@@ -108,6 +108,12 @@ class Recorder(threading.Thread):
                 if len(result) == 0 or result.has_key('outcome') == False or result['outcome'].has_key('confidence') == False or result['outcome']['confidence'] < self.wit_confidence:
                     if wit_e is not None:
                         log.err("Wit exception : " + str(e))
+                    elif len(result) == 0:
+                        log.err("No response from Wit")
+                    elif result.has_key('outcome') == False or result['outcome'].has_key('confidence') == False:
+                        log.err("Wit response syntax error")
+                    elif result['outcome']['confidence'] < self.wit_confidence:
+                        log.err("Wit confidence too low")
 
                     # If retry is available and vader detected an utterance
                     if self.record_time_start != 0 and retry > 0:
