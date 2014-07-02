@@ -150,7 +150,7 @@ class Speaker(threading.Thread):
 
             # Pico TTS
             elif self.engine == "pico":
-                call(['/usr/bin/pico2wave', '-w', filename, '-l', self.lang, '"'+ data + '"'])
+                call(['/usr/bin/pico2wave', '-w', filename, '-l', self.lang, '"'+ data.encode('utf8') + '"'])
 
             # VoiceRSS
             elif self.engine == "voicerss":
@@ -182,7 +182,8 @@ class Speaker(threading.Thread):
 
                 # If already generated
                 if os.path.isfile(filename):
-                    os.remove(filename)
+                    continue
+                    #os.remove(filename)
 
                 log.msg(_("Generating %(filename)s : '%(message)s'" % {'filename': str(filename), 'message': msg[1]}).encode('utf8'))
 
@@ -197,4 +198,4 @@ class Speaker(threading.Thread):
 
                 # PicoTTS
                 elif self.engine == "pico" and not os.path.isfile(filename):
-                    call(['/usr/bin/pico2wave', '-w', filename, '-l', self.lang, '"'+ msg[1] + '"'])
+                    call(['/usr/bin/pico2wave', '-w', filename, '-l', self.lang, '"'+ msg[1].encode('utf8') + '"'])

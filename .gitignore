@@ -34,3 +34,4 @@ nosetests.xml
 .pydevproject
 neo*
 lium_french_*
+hub4wsj_sc_8k

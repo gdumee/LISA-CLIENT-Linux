@@ -106,7 +106,7 @@ class LisaClient(LineReceiver):
                     # Send TTS
                     if datajson.has_key('nolistener') == False:
                         Speaker.start()
-                        Speaker.speak(datajson['body'])
+                        #Speaker.speak(datajson['body'])
 
                     # Create listener
                     if datajson.has_key('nolistener') == False and not self.listener:

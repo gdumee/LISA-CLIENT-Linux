@@ -6,9 +6,18 @@ from collections import deque
 import threading
 from wit import Wit
 import time
-from time import sleep
+from time import sleep,time
 from twisted.python import log
-from lisa.client.lib.speaker import Speaker
+
+# Max silence before considering the end of the utterance
+MAX_SILENCE_s = 1
+
+# Maximum record duration in seconds
+MAX_RECORD_DURATION_s = 10
+
+# Maximum record length before keyword spot
+MAX_TIME_BEFORE_KWS_s = 5
+
 
 class Recorder(threading.Thread):
     def __init__(self, lisa_client, listener):
@@ -19,59 +28,33 @@ class Recorder(threading.Thread):
         self.lisa_client = lisa_client
         self.configuration = ConfigManagerSingleton.get().getConfiguration()
         self.pipeline = listener.get_pipeline()
-        self.capture_buffers = deque([])
         self.running_state = False
         self.wit = Wit(self.configuration['wit_token'])
         self.wit_confidence = 0.5
         if self.configuration.has_key('confidence'):
             self.wit_confidence = self.configuration['wit_confidence']
-        self.record_time_start = 0
-        self.record_time_end = 0
+        self.records = []
 
         # Get app sink
         self.rec_sink = self.pipeline.get_by_name('rec_sink')
         self.rec_sink.connect('new-buffer', self._capture_audio_buffer)
-
-        # Configure vader
-        # Using vader on pocketsphinx branch and not a vader on record branch,
-        # because vader forces stream to 8KHz, so record quality would be worst
-        vader = self.pipeline.get_by_name('vad_asr')
-        vader.connect('vader-start', self._vader_start)
-        vader.connect('vader-stop', self._vader_stop)
-
-        # Get elements to connect/disconnect pockesphinx during record
-        self.asr_tee = self.pipeline.get_by_name('asr_tee')
-        self.asr_sink = self.pipeline.get_by_name('asr_sink')
-        self.asr = self.pipeline.get_by_name('asr')
-        self.asr_tee.unlink(self.asr_sink)
 
         # Start thread
         self.start()
 
     def stop(self):
         # Raise stop event
-        self.running_state = False
         self._stopevent.set()
 
-    def get_running_state(self):
+    def activate(self):
         """
-        Is the recorder recording?
+        Called to activate current utter as a record
         """
-        return self.running_state
-
-    def set_running_state(self, running):
-        """
-        Start/Stop a voice record
-        """
-        if running == True and self.running_state == False:
-            self.running_state = True
-
-            # Disconnect pocketsphinx from pipeline
-            self.asr_tee.link(self.asr_sink)
-            self.asr_tee.unlink(self.asr)
-
-        elif running == True and self.running_state == True:
-            self.running_state = False
+        # If there is a current record
+        # TODO if several records, which one to activate?
+        if len(self.records) > 0 and self.records[-1]['finished'] == False:
+            # Activate record
+            self.records[-1]['activated'] = True
 
     def run(self):
         """
@@ -83,27 +66,32 @@ class Recorder(threading.Thread):
 
         # Thread loop
         while not self._stopevent.isSet():
-            # Wait record order
-            if self.running_state == False:
+            # If there is a current record
+            if len(self.records) == 0:
                 sleep(.1)
                 continue
 
-            # Activate capture, wait for 2s of silence before cancelling
-            wit_e = None
-            self.record_time_start = 0
-            self.record_time_end = time.time() + 2
-            self.capture_buffers.clear()
-            result = ""
-            print '\n [Recording]' + ' ' * 20 + '[Recording]'
+            # Finish if end reached
+            if self.records[-1]['finished'] == False and self.records[-1]['end'] <= time():
+                self.records[-1]['finished'] = True
+            
+            # Delete finished records that were not activated
+            while len(self.records) > 0 and self.records[0]['finished'] == True and self.records[0]['activated'] == False:
+                self.records.pop(0)
 
-            # Send captured voice to wit
-            try:
-                result = self.wit.post_speech(data = self._read_audio_buffer(), content_type=CONTENT_TYPE)
-            except Exception as e:
-                wit_e = e
+            # Send activated records to Wit
+            while len(self.records) > 0 and self.records[0]['activated'] == True:
+                wit_e = None
+                result = ""
+                try:
+                    result = self.wit.post_speech(data = self._read_audio_buffer(), content_type = CONTENT_TYPE)
+                except Exception as e:
+                    wit_e = e
 
-            # If record was stopped during recording
-            if self.running_state == True:
+                # If record was stopped during recording
+                if self._stopevent.isSet():
+                    break
+
                 # If Wit did not succeeded
                 if len(result) == 0 or result.has_key('outcome') == False or result['outcome'].has_key('confidence') == False or result['outcome']['confidence'] < self.wit_confidence:
                     if wit_e is not None:
@@ -113,86 +101,101 @@ class Recorder(threading.Thread):
                     elif result.has_key('outcome') == False or result['outcome'].has_key('confidence') == False:
                         log.err("Wit response syntax error")
                     elif result['outcome']['confidence'] < self.wit_confidence:
-                        log.err("Wit confidence too low")
-
-                    # If retry is available and vader detected an utterance
-                    if self.record_time_start != 0 and retry > 0:
-                        Speaker.speak('please_repeat')
-
-                        # Decrement retries
-                        retry = retry - 1
-                        continue
-
-                    # No more retry
-                    Speaker.speak('not_understood')
+                        log.err("Wit confidence too low : " + unicode(result['msg_body']))
 
                 # Send recognized intent to the server
                 else:
+                    log.msg("Wit result : " + unicode(result['msg_body']))
                     self.lisa_client.sendMessage(message=result['msg_body'], type='chat', dict=result['outcome'])
 
-            # Reset running state
-            self.running_state = False
-            retry = 1
+                # Remove sent record
+                self.records.pop(0)
 
-            # Reconnect pocketsphinx to pipeline
-            print ""
-            print "> Ready Recognize Voice"
-            self.asr_tee.link(self.asr)
-            self.asr_tee.unlink(self.asr_sink)
+        # Finish current buffer
+        for r in self.records:
+            r['finished'] = True
 
-    def _vader_start(self, ob, message):
+    def vader_start(self):
         """
         Vader start detection
         """
-        # Reset max recording time
-        if self.running_state == True:
-            if self.record_time_start == 0:
-                self.record_time_start = time.time()
-                self.record_time_end = self.record_time_start + 10
+        # Create a new record if needed
+        if len(self.records) == 0 or self.records[-1]['finished'] == True:
+            self.records.append({'finished' : False, 'activated' : False, 'start' : time(), 'end' : 0, 'buffers' : deque({})})
+            print "start : new record"
 
-    def _vader_stop(self, ob, message):
+        # Reset max recording time
+        self.records[-1]['end'] = self.records[-1]['start'] + MAX_RECORD_DURATION_s
+        
+        print "start : set end to %f" % (self.records[-1]['end'] - time())
+        
+    def vader_stop(self):
         """
         Vader stop detection
         """
-        # Stop recording if no new sentence in next 2s
-        if self.running_state == True:
-            if self.record_time_start != 0 and self.record_time_end > time.time() + 2:
-                self.record_time_end = time.time() + 2
+        # End recording when no new activity during next silence
+        if len(self.records) > 0 and self.records[-1]['end'] > time() + MAX_SILENCE_s:
+            self.records[-1]['end'] = time() + MAX_SILENCE_s
+            print "stop : set end to %f" % (self.records[-1]['end'] - time())
+        else:
+            print "stop : no set end"
 
     def _capture_audio_buffer(self, app):
         """
         Gstreamer pipeline callback : Audio buffer capture
         """
         # Get buffer
-        Buffer = self.rec_sink.emit('pull-buffer')
+        buf = self.rec_sink.emit('pull-buffer')
 
-        # If recording is running
-        if self.running_state == True:
+        # If a record is running
+        if len(self.records) > 0 and self.records[-1]['finished'] == False:
+            cur_time = time()
+
             # Add buffer to queue
-            self.capture_buffers.append(Buffer)
+            self.records[-1]['buffers'].append({'time' : cur_time, 'data' : buf})
 
+            # Delete too old buffers when utter is not activated
+            if self.records[-1]['activated'] == False:
+                while self.records[-1]['buffers'][0]['time'] + MAX_TIME_BEFORE_KWS_s < cur_time:
+                    self.records[-1]['buffers'].popleft()
+            
     def _read_audio_buffer(self):
         """
         Read buffers from capture queue
         """
         last_progress = -1
 
+        # Check current record
+        if len(self.records) == 0 or self.records[0]['activated'] == False:
+            return
+        
+        filename = "/home/ubuntu/record.mp3"
+        f = open(filename, "w")
+        
         # While recording is running
-        while time.time() < self.record_time_end:
-            # If there is a captured buffer
-            if len(self.capture_buffers) > 0:
-                data = self.capture_buffers.popleft()
-                yield data
-            else:
-                # Wait another buffer
-                sleep(.05)
+        log.msg("Wit send start")
+        while not self._stopevent.isSet() and len(self.records) > 0:
+            # If there is no captured buffer
+            if len(self.records[0]['buffers']) == 0:
+                # When record is finished, it's over
+                if self.records[-1]['end'] <= time():
+                    self.records[-1]['finished'] = True
+                    log.msg("Wit send end")
+                    break
+                else:
+                    # Wait another buffer
+                    sleep(.05)
+                    continue
+            
+            # Read buffer
+            buf = None
+            while len(self.records[0]['buffers']) > 0 and (buf is None or len(buf) + len(self.records[0]['buffers'][0]['data']) < 1200):
+                data = self.records[0]['buffers'].popleft()
+                if buf is None:
+                    buf = data['data']
+                else:
+                    buf = buf.merge(data['data'])
+            yield buf
+            f.write(buf)
 
-            # Print progression
-            if self.record_time_start != 0:
-                progress = (int)(2 * (time.time() - self.record_time_start)) + 1
-            else:
-                progress = 0
-            if last_progress != progress:
-                last_progress = progress
-                print '\x1b[1A',
-                print '[Recording]' + '.' * progress + ' ' * (20 - progress) + '[Recording]'
+        f.close()
