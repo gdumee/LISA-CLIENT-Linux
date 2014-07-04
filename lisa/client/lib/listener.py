@@ -56,28 +56,25 @@ class Listener(threading.Thread):
         #                                           |->queue->audioConvert->audioResample->lamemp3enc->appsink
         # fakesink : async=false is mandatory for parallelism
         pipeline = 'pulsesrc ! audioconvert' \
-                    + ' ! tee name=audio_tee ' \
-                    + ' audio_tee. ! queue ' \
-                    + '            ! audioconvert ! audioresample ' \
-                    + '            ! audio/x-raw-int, format=(string)S16_LE, channels=1, rate=16000 ' \
-                    + '            ! lamemp3enc bitrate=64 mono=true ' \
-                    + '            ! appsink name=rec_sink emit-signals=true ' \
-                    + ' audio_tee. ! queue ! audiocheblimit mode=1 cutoff=150' \
-                    + '            ! audiodynamic ! audioconvert ! audioresample' \
-                    + '            ! tee name=asr_tee'
+                    + ' ! tee name=audio_tee' \
+                    + ' audio_tee.' \
+                    + ' ! queue' \
+                    + ' ! audioconvert ! audioresample' \
+                    + ' ! audio/x-raw-int, format=(string)S16_LE, channels=1, rate=16000' \
+                    + ' ! lamemp3enc bitrate=64 mono=true' \
+                    + ' ! appsink name=rec_sink emit-signals=true async=false' \
+                    + ' audio_tee.' \
+                    + ' ! queue ! audiocheblimit mode=1 cutoff=150' \
+                    + ' ! audiodynamic ! audioconvert ! audioresample' \
+                    + ' ! tee name=asr_tee'
         
         # Add pocketsphinx
         for i in range(NUM_PIPES):
             pipeline = pipeline \
-                    + ' asr_tee. ! queue' \
+                    + ' asr_tee.' \
                     + ' ! vader name=vad_%d auto-threshold=true' % (i) \
                     + ' ! pocketsphinx name=asr_%d' % (i) \
                     + ' ! fakesink async=false'
-            #pipeline = pipeline \
-            #        + ' asr_tee. ! queue' \
-            #        + ' ! vader name=vad_%d auto-threshold=true dump_dir=/home/ubuntu/vad%d' % (i, i) \
-            #        + ' ! pocketsphinx name=asr_%d' % (i) \
-            #        + ' ! fakesink async=false'
 
         # Create pipeline
         self.pipeline = gst.parse_launch(pipeline)
@@ -103,6 +100,9 @@ class Listener(threading.Thread):
                         asr.set_property("hmm", hmm_path)
             asr.connect('result', self._asr_result, i)
             asr.set_property('configured', 1)
+            
+            # TODO 
+            self.pipes[i]['ps'] = pocketsphinx.Decoder(boxed = asr.get_property('decoder'))
 
         # Create recorder
         self.recorder = Recorder(lisa_client = lisa_client, listener = self)
@@ -160,10 +160,12 @@ class Listener(threading.Thread):
         Result from pocketsphinx : checking keyword recognition
         """
         # Get score from decoder
-        dec_score = string.atoi(uttid)
-        
+        # TODO
+        #dec_score = string.atoi(uttid)
+        dec_text, dec_uttid, dec_score = self.pipes[pipe_id]['ps'].get_hyp()
+
         # Detection must have a minimal score to be valid
-        if dec_score < self.keyword_score:
+        if dec_score != 0 and dec_score < self.keyword_score:
             log.msg("I recognized the %s keyword but I think it's a false positive according the %s score" % (self.botname, dec_score))
             return
 

@@ -61,8 +61,6 @@ class Recorder(threading.Thread):
         Recorder main loop
         """
         CONTENT_TYPE = 'audio/mpeg3'
-        result = ""
-        retry = 1
 
         # Thread loop
         while not self._stopevent.isSet():
@@ -80,6 +78,7 @@ class Recorder(threading.Thread):
                 self.records.pop(0)
 
             # Send activated records to Wit
+            retry_flag = False
             while len(self.records) > 0 and self.records[0]['activated'] == True:
                 wit_e = None
                 result = ""
@@ -100,13 +99,14 @@ class Recorder(threading.Thread):
                         log.err("No response from Wit")
                     elif result.has_key('outcome') == False or result['outcome'].has_key('confidence') == False:
                         log.err("Wit response syntax error")
+                        log.err("result : %s" % (str(result)))
                     elif result['outcome']['confidence'] < self.wit_confidence:
-                        log.err("Wit confidence too low : " + unicode(result['msg_body']))
+                        log.err("Wit confidence too low : " + result['msg_body'])
 
                 # Send recognized intent to the server
                 else:
-                    log.msg("Wit result : " + unicode(result['msg_body']))
-                    self.lisa_client.sendMessage(message=result['msg_body'], type='chat', dict=result['outcome'])
+                    log.msg("Wit result : " + result['msg_body'])
+                    self.lisa_client.sendMessage(message = result['msg_body'], type = 'chat', dict = result['outcome'])
 
                 # Remove sent record
                 self.records.pop(0)
@@ -122,12 +122,9 @@ class Recorder(threading.Thread):
         # Create a new record if needed
         if len(self.records) == 0 or self.records[-1]['finished'] == True:
             self.records.append({'finished' : False, 'activated' : False, 'start' : time(), 'end' : 0, 'buffers' : deque({})})
-            print "start : new record"
 
         # Reset max recording time
         self.records[-1]['end'] = self.records[-1]['start'] + MAX_RECORD_DURATION_s
-        
-        print "start : set end to %f" % (self.records[-1]['end'] - time())
         
     def vader_stop(self):
         """
@@ -136,9 +133,6 @@ class Recorder(threading.Thread):
         # End recording when no new activity during next silence
         if len(self.records) > 0 and self.records[-1]['end'] > time() + MAX_SILENCE_s:
             self.records[-1]['end'] = time() + MAX_SILENCE_s
-            print "stop : set end to %f" % (self.records[-1]['end'] - time())
-        else:
-            print "stop : no set end"
 
     def _capture_audio_buffer(self, app):
         """
