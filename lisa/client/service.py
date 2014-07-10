@@ -13,6 +13,8 @@ try:
     gobject.threads_init()
     from lisa.client import lib
     from lib import Listener
+    from lib import Player
+    from lib import Recorder
     from lib import Speaker
 except:
     gobjectnotimported = True
@@ -53,14 +55,13 @@ class LisaClient(LineReceiver):
         if self.configuration.has_key("zone"):
             self.zone = self.configuration['zone']
 
-
     def sendMessage(self, message, type='chat', dict=None):
         if dict:
             line = json.dumps(
                 {
-                    "from": unicode(platform.node()),
+                    "from": platform.node(),
                     "type": type,
-                    "body": unicode(message),
+                    "body": message,
                     "zone": self.zone,
                     "outcome": dict
                 }
@@ -68,18 +69,23 @@ class LisaClient(LineReceiver):
         else:
             line = json.dumps(
                 {
-                    "from": unicode(platform.node()),
+                    "from": platform.node(),
                     "type": type,
-                    "body": unicode(message),
+                    "body": message,
                     "zone": self.zone
                 }
             )
 
         if self.debug_output:
-            log.msg('OUTPUT: %s' % line)
+            log.msg('OUTPUT: {0}'.format(line))
 
         # send line to the server
         self.sendLine(line)
+
+    def sendAnswer(self, message, dict=None):
+        type = 'answer'
+        dict['answer_arg'] = self.answer_arg
+        self.SendMessage(message, type, dict)
 
     def lineReceived(self, data):
         """
@@ -89,7 +95,7 @@ class LisaClient(LineReceiver):
 
         datajson = json.loads(data)
         if self.debug_input == True:
-            log.msg("INPUT: " + unicode(datajson))
+            log.msg("INPUT: {0}".format(str(datajson)))
 
         if datajson.has_key("type"):
             if datajson['type'] == 'chat':
@@ -99,30 +105,29 @@ class LisaClient(LineReceiver):
             elif datajson['type'] == 'command':
                 if datajson['command'] == 'LOGIN':
                     # Get Bot name
-                    botname = unicode(datajson['bot_name'])
-                    log.msg("setting botname to %s" % botname)
+                    botname = datajson['bot_name']
+                    log.msg("setting botname to {0}".format(botname))
                     self.botname = botname
 
                     # Send TTS
                     if datajson.has_key('nolistener') == False:
+                        # Create
+                        self.listener = Listener(lisa_client = self)
+                        self.recorder = Recorder(lisa_client = self)
+                        
+                        # Start
                         Speaker.start()
-                        #Speaker.speak(datajson['body'])
+                        self.listener.start(self.recorder)
+                        self.recorder.start(self.listener)
 
-                    # Create listener
-                    if datajson.has_key('nolistener') == False and not self.listener:
-                        self.listener = Listener(lisa_client = self, botname = botname)
-
-                # TODO seems a bit more complicated than I thought. I think the reply will be another type like "answer"
-                # TODO and will contains a unique ID. On server side, the question will be stored in mongodb so it will
-                # TODO let possible the multi user / multi client. Questions need to implement a lifetime too.
-                # TODO For the soundqueue, I will need a callback system to be sure to play the audio before recording
                 elif datajson['command'] == 'ASK':
                     if datajson.has_key('nolistener') == False:
                         Speaker.speak(datajson['body'])
 
-                    # Start record
+                    # Start record answer
+                    self.answer_arg = datajson['answer_arg']
                     if datajson.has_key('nolistener') == False and self.listener:
-                        self.listener.record()
+                        self.recorder.activate_question()
 
         else:
             # Send to TTS queue
@@ -148,7 +153,7 @@ class LisaClient(LineReceiver):
         Callback on connection loss
         """
         # Stop listener
-        log.msg("Lost connection with server : " + reason.getErrorMessage())
+        log.msg("Lost connection with server : {0}".format(reason.getErrorMessage()))
         if self.listener:
             self.listener.stop()
 
@@ -162,7 +167,6 @@ class LisaClientFactory(ReconnectingClientFactory):
 
     def Init(self):
         self.configuration = ConfigManagerSingleton.get().getConfiguration()
-
 
     def startedConnecting(self, connector):
         pass
@@ -186,7 +190,9 @@ class LisaClientFactory(ReconnectingClientFactory):
     def clientConnectionFailed(self, connector, reason):
         # Warn on first failure
         if self.first_time == True:
+            Speaker.start()
             Speaker.speak("no_server")
+            Speaker.stop()
             self.first_time = False
 
         # Retry

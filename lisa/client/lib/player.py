@@ -1,90 +1,150 @@
 # -*- coding: UTF-8 -*-
+#-----------------------------------------------------------------------------
+# project     : Lisa client
+# module      : lib
+# file        : player.py
+# description : Play sounds from a file
+# author      : G.Dumee
+#-----------------------------------------------------------------------------
+# copyright   : Neotique
+#-----------------------------------------------------------------------------
 
+
+#-----------------------------------------------------------------------------
 # Imports
+#-----------------------------------------------------------------------------
 import gst
 import os
 import gobject
 gobject.threads_init()
 
 
+#-----------------------------------------------------------------------------
+# Globals
+#-----------------------------------------------------------------------------
 # Current path
 PWD = os.path.dirname(os.path.abspath(__file__ + '/..'))
 
-# Create a gtreamer playerbin
-__PLAYER__ = None
 
-# Connect End Of Stream handler on bus
-main_loop = gobject.MainLoop()
-def eos_handler(bus, message):
-    __PLAYER__.set_state(gst.STATE_READY)
-    main_loop.quit()
-
-
-def play(sound, path=None, ext=None):
+#-----------------------------------------------------------------------------
+# Player
+#-----------------------------------------------------------------------------
+class Player:
     """
-    Play a sound. Determine path and extension if not provided.
+    Play a sound file. Determine path and extension if not provided.
     """
-    global PWD
-    global __PLAYER__
+    # Singleton instance
+    __instance = None
 
-    # Create player once
-    if __PLAYER__ is None:
-        __PLAYER__ = gst.element_factory_make("playbin2", "player")
+    #-----------------------------------------------------------------------------
+    def play(self, sound, path = None, ext = None):
+        # Create singleton
+        if self.__instance is None:
+            self.__instance = Player()
         
+        # Call singleton API
+        self.__instance._play(sound, path, ext)
+    play = classmethod(play)
+
+    #-----------------------------------------------------------------------------
+    def play_block(self, sound, path = None, ext = None):
+        # Create singleton
+        if self.__instance is None:
+            self.__instance = Player()
+        
+        # Call singleton API
+        self.__instance._play_block(sound, path, ext)
+    play_block = classmethod(play_block)
+
+    #-----------------------------------------------------------------------------
+    def free(self):
+        # Create singleton
+        if self.__instance is None:
+            return
+        
+        # Call singleton API
+        self.__instance._free()
+    free = classmethod(free)
+
+    #-----------------------------------------------------------------------------
+    def __init__(self):
+        # Check Singleton
+        if self.__instance is not None:
+            raise Exception("Singleton can't be created twice !")
+
+        # Create a gtreamer playerbin
+        self._pipeline = None
+
         # Connect End Of Stream handler on bus
-        bus = __PLAYER__.get_bus()
-        bus.add_signal_watch()
-        bus.connect('message::eos', eos_handler)
+        self.main_loop = gobject.MainLoop()
+        
+    #-----------------------------------------------------------------------------
+    def _eos_handler(self, bus, message):
+        self._pipeline.set_state(gst.STATE_READY)
+        self.main_loop.quit()
 
-    # Stop previous play if any
-    else:
-        __PLAYER__.set_state(gst.STATE_READY)
+    #-----------------------------------------------------------------------------
+    def _play(self, sound, path=None, ext=None):
+        global PWD
 
-    # Get path
-    if not path:
-        path = "%s/sounds" % PWD
+        # Create player once
+        if self._pipeline is None:
+            self._pipeline = gst.element_factory_make("playbin2", "player")
+            
+            # Connect End Of Stream handler on bus
+            bus = self._pipeline.get_bus()
+            bus.add_signal_watch()
+            bus.connect('message::eos', self._eos_handler)
 
-    # Search extension
-    if os.path.isfile(sound):
-        filename = sound
-    elif ext is not None and os.path.isfile('%s/%s.%s' % (path, sound, ext)):
-        filename = '%s/%s.%s' % (path, sound, ext)
-    elif os.path.isfile('%s/%s.wav' % (path, sound)):
-        filename = '%s/%s.wav' % (path, sound)
-    elif os.path.isfile('%s/%s.ogg' % (path, sound)):
-        filename = '%s/%s.ogg' % (path, sound)
-    elif os.path.isfile('/tmp/%s.wav' % sound):
-        filename = '/tmp/%s.wav' % sound
-    elif os.path.isfile('/tmp/%s.ogg' % sound):
-        filename = '/tmp/%s.ogg' % sound
-    else:
-        filename = '%s/sounds/pi-cancel.wav' % PWD
+        # Stop previous play if any
+        else:
+            self._pipeline.set_state(gst.STATE_READY)
 
-    # Play file
-    __PLAYER__.set_property('uri', 'file://%s' % filename)
-    __PLAYER__.set_state(gst.STATE_PLAYING)
+        # Get path
+        if not path:
+            path = "{0}/sounds".format(PWD)
 
+        # Search extension
+        if os.path.isfile(sound):
+            filename = sound
+        elif ext is not None and os.path.isfile("{path}/{file}.{ext}".format(path = path, file = sound, ext = ext)):
+            filename = "{path}/{file}.{ext}".format(path = path, file = sound, ext = ext)
+        elif os.path.isfile("{path}/{file}.{ext}".format(path = path, file = sound, ext = "wav")):
+            filename = "{path}/{file}.{ext}".format(path = path, file = sound, ext = "wav")
+        elif os.path.isfile("{path}/{file}.{ext}".format(path = path, file = sound, ext = "ogg")):
+            filename = "{path}/{file}.{ext}".format(path = path, file = sound, ext = "ogg")
+        elif os.path.isfile("{path}/{file}.{ext}".format(path = "/tmp", file = sound, ext = "wav")):
+            filename = "{path}/{file}.{ext}".format(path = "/tmp", file = sound, ext = "wav")
+        elif os.path.isfile("{path}/{file}.{ext}".format(path = "/tmp", file = sound, ext = "ogg")):
+            filename = "{path}/{file}.{ext}".format(path = "/tmp", file = sound, ext = "ogg")
+        else:
+            filename = '{path}/sounds/pi-cancel.wav'.format(path = PWD)
 
-def play_block(sound, path=None, ext=None):
-    """
-    Play sound but block until end
-    """
-    global main_loop
-
-    # Play sound
-    play(sound = sound, path = path, ext = ext)
-
-    # Wait for EOS signal in mail loop
-    main_loop.run()
+        # Play file
+        self._pipeline.set_property('uri', 'file://{file}'.format(file = filename))
+        self._pipeline.set_state(gst.STATE_PLAYING)
 
 
-def play_free():
-    """
-    Free player
-    """
-    global __PLAYER__
-    
-    # Delete player
-    if __PLAYER__ is not None:
-        __PLAYER__.set_state(gst.STATE_NULL)
-        __PLAYER__ = None
+    #-----------------------------------------------------------------------------
+    def _play_block(self, sound, path=None, ext=None):
+        """
+        Play sound but block until end
+        """
+        # Play sound
+        Player.play(sound = sound, path = path, ext = ext)
+
+        # Wait for EOS signal in mail loop
+        self.main_loop.run()
+
+
+    #-----------------------------------------------------------------------------
+    def _free(self):
+        """
+        Free player
+        """
+        # Delete player
+        if self._pipeline is not None:
+            self._pipeline.set_state(gst.STATE_NULL)
+            self._pipeline = None
+
+# --------------------- End of player.py  ---------------------
