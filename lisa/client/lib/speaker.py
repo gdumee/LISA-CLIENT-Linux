@@ -65,7 +65,7 @@ class Speaker(threading.Thread):
         self.lang = "en-EN"
         if self.configuration.has_key('lang'):
             self.lang = self.configuration['lang']
-        if self.configuration.has_key("tts") == False or self.configuration["tts"].lower() == "pico"or self.configuration["tts"].lower() == "picotts":
+        if self.configuration.has_key("tts") == False or self.configuration["tts"].lower() == "pico" or self.configuration["tts"].lower() == "picotts":
             self.engine = "pico"
             self.ext = "wav"
         elif self.configuration["tts"].lower() == "voicerss" and "voicerss_key" in self.configuration:
@@ -130,7 +130,7 @@ class Speaker(threading.Thread):
 
             # Pico TTS
             if self.engine == "pico":
-                call(['/usr/bin/pico2wave', '-w', filename, '-l', self.lang, '"'+ data + '"'])
+                call(['/usr/bin/pico2wave', '-w', filename, '-l', self.lang, '"' + data.encode('utf8') + '"'])
 
             # VoiceRSS
             elif self.engine == "voicerss":

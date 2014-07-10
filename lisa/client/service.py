@@ -85,7 +85,7 @@ class LisaClient(LineReceiver):
     def sendAnswer(self, message, dict=None):
         type = 'answer'
         dict['answer_arg'] = self.answer_arg
-        self.SendMessage(message, type, dict)
+        self.sendMessage(message, type, dict)
 
     def lineReceived(self, data):
         """

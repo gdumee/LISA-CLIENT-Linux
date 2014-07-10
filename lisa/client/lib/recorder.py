@@ -134,13 +134,13 @@ class Recorder(threading.Thread):
             if self._stopevent.isSet():
                 break
 
+            # Question mode
+            if len(result) > 0 and self.record['question_mode'] == True and result.has_key('msg_body') == True and len(result['msg_body']) > 0:
+                # Send answer
+                self.lisa_client.sendAnswer(message = result['msg_body'], dict = result['outcome'])
             # If Wit did not succeeded
-            if len(result) == 0 or result.has_key('outcome') == False or result['outcome'].has_key('confidence') == False or result['outcome']['confidence'] < self.wit_confidence:
-                # Question mode
-                if self.record['question_mode'] == True and result.has_key('msg_body') == True and len(result['msg_body']) > 0:
-                    # Send answer
-                    self.lisa_client.sendAnswer(message = result['msg_body'], dict = result['outcome'])
-                elif wit_e is not None:
+            elif len(result) == 0 or result.has_key('outcome') == False or result['outcome'].has_key('confidence') == False or result['outcome']['confidence'] < self.wit_confidence:
+                if wit_e is not None:
                     log.err("Wit exception : {0}".format(str(e)))
                 elif len(result) == 0:
                     log.err("No response from Wit")
