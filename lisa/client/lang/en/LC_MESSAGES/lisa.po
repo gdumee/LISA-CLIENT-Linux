@@ -1,0 +1,34 @@
+msgid "error_conf"
+msgstr  "(1, \"My configuration file is not readable\"),"
+        "(1, \"There's an error with my configuration file\")"
+
+msgid "not_understood"
+msgstr  "(1, \"I didn't understood your question\"),"
+        "(1, \"I can't hear you clearly\"),"
+        "(1, \"I didn't understood\")"
+
+msgid "please_repeat"
+msgstr  "(1, \"Can you repeat please ?\"),"
+        "(1, \"I didn't understood, can you repeat please ?\")"
+
+msgid "ready"
+msgstr  "(3, \"I'm ready ok\"),"
+        "(1, \"Initialization completed\"),"
+        "(1, \"I'm ready to answer your questions\")"
+
+msgid "no_server"
+msgstr  "(1, \"Sorry, I can't connect to the server\"),"
+        "(1, \"I can't join the server, please check your connection\")"
+
+msgid "lost_server"
+msgstr  "(1, \"An error happened, I'm not available anymore\"),"
+        "(1, \"My connection was interrupted, please wait\")"
+
+msgid "playing_TTS"
+msgstr "Playing generated TTS"
+
+msgid "error_generate_TTS"
+msgstr "There was an error creating the output file {filename}"
+
+msgid "generating_TTS"
+msgstr "Generating {filename} : '{message}'"
