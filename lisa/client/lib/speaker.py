@@ -17,7 +17,6 @@ from lisa.client.ConfigManager import ConfigManagerSingleton
 from lisa.Neotique.NeoTrans import NeoTrans
 import threading
 import os
-import gettext
 from lisa.client.lib.player import Player
 from Queue import Queue
 from time import sleep
@@ -77,8 +76,7 @@ class Speaker(threading.Thread):
             return
         
         # Translation function
-        self._ = translation = gettext.translation(domain = 'lisa', localedir = path, fallback = True, languages = [self.lang.split('-')[0]]).ugettext
-        self._ = NeoTrans(self._, path).Trans
+        self._ = NeoTrans(domain = 'lisa', localedir = path, fallback = True, languages = [self.lang.split('-')[0]]).Trans
 
         # Start thread
         threading.Thread.start(self)
