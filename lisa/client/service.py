@@ -1,6 +1,18 @@
 # -*- coding: UTF-8 -*-
+#-----------------------------------------------------------------------------
+# project     : Lisa client
+# module      : client
+# file        : service.py
+# description : Lisa client twisted service
+# author      : G.Dumee
+#-----------------------------------------------------------------------------
+# copyright   : Neotique
+#-----------------------------------------------------------------------------
 
+
+#-----------------------------------------------------------------------------
 # Imports
+#-----------------------------------------------------------------------------
 from twisted.python import log
 import signal
 gobjectnotimported = False
@@ -30,12 +42,18 @@ import json, os
 from OpenSSL import SSL
 import platform
 
+
+#-----------------------------------------------------------------------------
 # Globals
+#-----------------------------------------------------------------------------
 PWD = os.path.dirname(os.path.abspath(__file__))
 configuration = None
 LisaFactory = None
 
 
+#-----------------------------------------------------------------------------
+# LisaClient
+#-----------------------------------------------------------------------------
 class LisaClient(LineReceiver):
     """
     Lisa TCP client
@@ -51,59 +69,53 @@ class LisaClient(LineReceiver):
                 self.debug_input = self.configuration["debug"]["debug_input"]
             if self.configuration["debug"].has_key("debug_output"):
                 self.debug_output = self.configuration["debug"]["debug_output"]
+        self.name = platform.node()
         self.zone = ""
         if self.configuration.has_key("zone"):
             self.zone = self.configuration['zone']
 
-    def sendMessage(self, message, type='chat', dict=None):
-        if dict:
-            line = json.dumps(
-                {
-                    "from": platform.node(),
-                    "type": type,
-                    "body": message,
-                    "zone": self.zone,
-                    "outcome": dict
-                }
-            )
-        else:
-            line = json.dumps(
-                {
-                    "from": platform.node(),
-                    "type": type,
-                    "body": message,
-                    "zone": self.zone
-                }
-            )
+    #-----------------------------------------------------------------------------
+    def sendToServer(self, jsonData):
+        # Add info to json
+        jsonData['from'] = self.name,
+        jsonData['zone'] = self.zone,
+        jsonData['to'] = 'Server'
 
         if self.debug_output:
-            log.msg('OUTPUT: {0}'.format(line))
+            log.msg('OUTPUT: {0}'.format(jsonData))
 
-        # send line to the server
-        self.sendLine(line)
+        # Send line to the server
+        self.sendLine(json.dumps(jsonData))
 
-    def sendAnswer(self, message, dict=None):
-        type = 'answer'
-        dict['answer_arg'] = self.answer_arg
-        self.sendMessage(message, type, dict)
+    #-----------------------------------------------------------------------------
+    def sendChat(self, message, outcome = None):
+        json = {'type': 'chat', 'message': message, 'outcome': outcome}
+        self.sendToServer(json)
 
+    #-----------------------------------------------------------------------------
     def lineReceived(self, data):
         """
         Data received callback
         The nolistener in configuration is here to let the travis build pass without loading gst
         """
-
         datajson = json.loads(data)
         if self.debug_input == True:
             log.msg("INPUT: {0}".format(str(datajson)))
 
         if datajson.has_key("type"):
+            datajson['type'] = datajson['type'].lower()
             if datajson['type'] == 'chat':
                 if datajson.has_key('nolistener') == False:
-                    Speaker.speak(datajson['body'])
+                    Speaker.speak(datajson['message'])
+
+            if datajson['type'].lower() == 'error':
+                log.err(datajson['message'])
+                if datajson.has_key('nolistener') == False:
+                    Speaker.speak(datajson['message'])
 
             elif datajson['type'] == 'command':
-                if datajson['command'] == 'LOGIN':
+                datajson['command'] = datajson['command'].lower()
+                if datajson['command'] == 'login ack':
                     # Get Bot name
                     botname = datajson['bot_name']
                     log.msg("setting botname to {0}".format(botname))
@@ -120,20 +132,28 @@ class LisaClient(LineReceiver):
                         self.listener.start(self.recorder)
                         self.recorder.start(self.listener)
 
-                elif datajson['command'] == 'ASK':
-                    if datajson.has_key('nolistener') == False:
-                        Speaker.speak(datajson['body'])
+                elif datajson['command'] == 'ask':
+                    if datajson.has_key('nolistener') == False and datajson.has_key('message'):
+                        Speaker.speak(datajson['message'])
 
-                    # Start record answer
-                    self.answer_arg = datajson['answer_arg']
-                    if datajson.has_key('nolistener') == False and self.listener:
-                        self.recorder.activate_question()
+                    # Set recorder in continuous mode
+                    if datajson.has_key('nolistener') == False and self.recorder:
+                        self.recorder.set_continuous_mode(True)
+
+                elif datajson['command'] == 'kws':
+                    if datajson.has_key('nolistener') == False and datajson.has_key('message'):
+                        Speaker.speak(datajson['message'])
+
+                    # Set KWS mode
+                    if datajson.has_key('nolistener') == False and self.recorder:
+                        self.recorder.set_continuous_mode(False)
 
         else:
             # Send to TTS queue
             if datajson.has_key('nolistener') == False:
                 Speaker.speak(datajson['body'])
 
+    #-----------------------------------------------------------------------------
     def connectionMade(self):
         """
         Callback on established connections
@@ -146,8 +166,10 @@ class LisaClient(LineReceiver):
             self.transport.startTLS(ctx, self.factory)
 
         # Login to server
-        self.sendMessage(message='LOGIN', type='command')
+        json = {'type': 'command', 'command': "login req"}
+        self.sendToServer(json)
 
+    #-----------------------------------------------------------------------------
     def connectionLost(self, reason):
         """
         Callback on connection loss
@@ -158,6 +180,9 @@ class LisaClient(LineReceiver):
             self.listener.stop()
 
 
+#-----------------------------------------------------------------------------
+# LisaClientFactory
+#-----------------------------------------------------------------------------
 class LisaClientFactory(ReconnectingClientFactory):
     # Create protocol
     active_protocol = None
@@ -165,12 +190,15 @@ class LisaClientFactory(ReconnectingClientFactory):
     # Warn about failure on first connection to the server
     first_time = True
 
+    #-----------------------------------------------------------------------------
     def Init(self):
         self.configuration = ConfigManagerSingleton.get().getConfiguration()
 
+    #-----------------------------------------------------------------------------
     def startedConnecting(self, connector):
         pass
 
+    #-----------------------------------------------------------------------------
     def buildProtocol(self, addr):
         # Reset retry delay
         self.resetDelay()
@@ -182,11 +210,13 @@ class LisaClientFactory(ReconnectingClientFactory):
         self.active_protocol = LisaClient()
         return self.active_protocol
 
+    #-----------------------------------------------------------------------------
     def clientConnectionLost(self, connector, reason):
         # Retry connection
         log.err('Lost connection.  Reason:', reason.getErrorMessage())
         ReconnectingClientFactory.clientConnectionLost(self, connector, reason)
 
+    #-----------------------------------------------------------------------------
     def clientConnectionFailed(self, connector, reason):
         # Warn on first failure
         if self.first_time == True:
@@ -201,12 +231,18 @@ class LisaClientFactory(ReconnectingClientFactory):
         ReconnectingClientFactory.clientConnectionFailed(self, connector, reason)
 
 
+#-----------------------------------------------------------------------------
+# LisaClientFactory
+#-----------------------------------------------------------------------------
 class ClientTLSContext(ssl.ClientContextFactory):
     isClient = 1
     def getContext(self):
         return SSL.Context(SSL.TLSv1_METHOD)
 
 
+#-----------------------------------------------------------------------------
+# LisaClientFactory
+#-----------------------------------------------------------------------------
 class CtxFactory(ssl.ClientContextFactory):
     def getContext(self):
         self.method = SSL.SSLv23_METHOD
@@ -219,7 +255,9 @@ class CtxFactory(ssl.ClientContextFactory):
 # Creating MultiService
 application = service.Application("LISA-Client")
 
+#-----------------------------------------------------------------------------
 # Handle Ctrl-C
+#-----------------------------------------------------------------------------
 def sigint_handler(signum, frame):
     global LisaFactory
 
@@ -235,7 +273,9 @@ def sigint_handler(signum, frame):
     # Stop speaker
     Speaker.stop()
 
+#-----------------------------------------------------------------------------
 # Make twisted service
+#-----------------------------------------------------------------------------
 def makeService(config):
     global LisaFactory
 
@@ -269,3 +309,5 @@ def makeService(config):
     lisaclientService.setServiceParent(multi)
 
     return multi
+
+# --------------------- End of service.py  ---------------------

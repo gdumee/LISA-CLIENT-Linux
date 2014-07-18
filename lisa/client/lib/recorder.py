@@ -24,6 +24,7 @@ from twisted.python import log
 import urllib2
 from urllib2 import Request, urlopen
 from subprocess import call
+from json import loads
 
 
 #-----------------------------------------------------------------------------
@@ -57,7 +58,8 @@ class Recorder(threading.Thread):
         self.wit_confidence = 0.5
         if self.configuration.has_key('confidence'):
             self.wit_confidence = self.configuration['wit_confidence']
-        self.record = {'activated' : False, 'start' : 0, 'started' : False, 'end' : 0, 'ended' : False, 'buffers' : deque({}), 'question_mode': False}
+        self.record = {'activated' : False, 'start' : 0, 'started' : False, 'end' : 0, 'ended' : False, 'buffers' : deque({})}
+        self.continuous_mode = False
 
     #-----------------------------------------------------------------------------
     def start(self, listener):
@@ -84,19 +86,19 @@ class Recorder(threading.Thread):
             self.record['activated'] = True
 
     #-----------------------------------------------------------------------------
-    def activate_question(self):
+    def set_continuous_mode(self, mode):
         """
-        Called to activate current utter as a record
+        Called to activate continous record mode
         """
         # Activate record
-        self.record['question_mode'] = True
-        self.record['activated'] = True
+        self.continuous_mode = mode
 
     #-----------------------------------------------------------------------------
     def run(self):
         """
         Recorder main loop
         """
+        # Encoded format
         CONTENT_TYPE = 'audio/mpeg3'
 
         # Thread loop
@@ -104,7 +106,7 @@ class Recorder(threading.Thread):
             # Test if record is ended
             if self.record['started'] == True and self.record['ended'] == False and self.record['end'] <= time():
                 # If current record was not activated before end
-                if self.record['activated'] == False:
+                if self.record['activated'] == False and self.continuous_mode == False:
                     self.record['start'] = 0
                     self.record['started'] = False
                     self.record['end'] = 0
@@ -117,15 +119,28 @@ class Recorder(threading.Thread):
                 self.record['ended'] = True
 
             # If current record is not activated
-            if self.record['activated'] == False:
+            if self.record['activated'] == False and self.continuous_mode == False:
                 sleep(.1)
                 continue
 
             # Send activated record to Wit
             wit_e = None
+            use_wit_audio = True
             result = ""
             try:
-                result = self.wit.post_speech(data = self._read_audio_buffer(), content_type = CONTENT_TYPE)
+                if use_wit_audio == True:
+                    result = self.wit.post_speech(data = self._read_audio_buffer(), content_type = CONTENT_TYPE)
+                else:
+                    self._read_audio_buffer(file_mode = True)
+                        
+                    url = 'https://www.google.com/speech-api/v2/recognize?output=json&lang=fr-fr&key=AIzaSyCQv4U1mTaw_r_j1bWb1peeaTihzV0q-EQ'
+                    file_upload = "/tmp/a.flac"
+                    audio = open(file_upload, "rb").read()
+                    header = {"Content-Type": "audio/x-flac; rate=16000"}
+                    post = urlopen(Request(url, audio, header))
+                    result = loads(post.read().split("\n")[1])['result'][0]['alternative'][0]['transcript']
+                    result = self.wit.get_message(result)
+
                 result['msg_body'] = result['msg_body'].encode("utf-8")
             except Exception as e:
                 wit_e = e
@@ -135,9 +150,9 @@ class Recorder(threading.Thread):
                 break
 
             # Question mode
-            if len(result) > 0 and self.record['question_mode'] == True and result.has_key('msg_body') == True and len(result['msg_body']) > 0:
+            if len(result) > 0 and self.continuous_mode == True and result.has_key('msg_body') == True and len(result['msg_body']) > 0:
                 # Send answer
-                self.lisa_client.sendAnswer(message = result['msg_body'], dict = result['outcome'])
+                self.lisa_client.sendChat(message = result['msg_body'], outcome = result['outcome'])
             # If Wit did not succeeded
             elif len(result) == 0 or result.has_key('outcome') == False or result['outcome'].has_key('confidence') == False or result['outcome']['confidence'] < self.wit_confidence:
                 if wit_e is not None:
@@ -155,7 +170,7 @@ class Recorder(threading.Thread):
             # Send recognized intent to the server
             else:
                 log.msg("Wit result : {0}".format(result['msg_body']))
-                self.lisa_client.sendMessage(message = result['msg_body'], type = 'chat', dict = result['outcome'])
+                self.lisa_client.sendChat(message = result['msg_body'], outcome = result['outcome'])
 
             # Finish current record
             self.record['start'] = 0
@@ -164,7 +179,6 @@ class Recorder(threading.Thread):
             self.record['ended'] = False
             self.record['activated'] = False
             self.record['buffers'].clear()
-            self.record['question_mode'] = False
 
     #-----------------------------------------------------------------------------
     def vader_start(self):
@@ -207,18 +221,22 @@ class Recorder(threading.Thread):
             self.record['buffers'].append({'time' : cur_time, 'data' : buf})
 
             # Delete too old buffers when utter is not activated
-            if self.record['activated'] == False:
+            if self.record['activated'] == False and self.continuous_mode == False:
                 while self.record['buffers'][0]['time'] + MAX_TIME_BEFORE_KWS_s < cur_time:
                     self.record['buffers'].popleft()
             
     #-----------------------------------------------------------------------------
-    def _read_audio_buffer(self):
+    def _read_audio_buffer(self, file_mode = False):
         """
         Read buffers from capture queue
         """
         # Check current record
-        if self.record['activated'] == False:
+        if self.record['activated'] == False and self.continuous_mode == False:
             return
+
+        f = None
+        if file_mode == True:
+            f = open("/tmp/a.flac", "wb")
         
         # While recording is running
         log.msg("Wit send start")
@@ -245,8 +263,13 @@ class Recorder(threading.Thread):
                     buf = data['data']
                 else:
                     buf = buf.merge(data['data'])
-            yield buf
+            if file_mode == False:
+                yield buf
+            else:
+                f.write(buf)
 
+        if file_mode == True:
+            f.close()
         log.msg("Wit send end")
         
 # --------------------- End of recorder.py  ---------------------
