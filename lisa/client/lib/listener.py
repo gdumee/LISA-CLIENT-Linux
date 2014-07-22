@@ -85,6 +85,18 @@ class Listener(threading.Thread):
                     + ' ! queue ! audiocheblimit mode=1 cutoff=150' \
                     + ' ! audiodynamic ! audioconvert ! audioresample' \
                     + ' ! tee name=asr_tee'
+        """pipeline = 'pulsesrc' \
+                    + ' ! tee name=audio_tee' \
+                    + ' audio_tee.' \
+                    + ' ! queue ! audiodynamic characteristics=soft-knee mode=compressor threshold=0.5 ratio=0.5 ! audioconvert ! audioresample' \
+                    + ' ! audio/x-raw-int, format=(string)S16_LE, channels=1, rate=16000' \
+                    + ' ! flacenc' \
+                    + ' ! appsink name=rec_sink emit-signals=true async=false' \
+                    + ' audio_tee.' \
+                    + ' ! queue ! audiocheblimit mode=1 cutoff=150' \
+                    + ' ! audiodynamic ! audioconvert ! audioresample' \
+                    + ' ! tee name=asr_tee'
+        """
         #TODO FLAC
         
         # Add pocketsphinx
