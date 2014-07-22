@@ -213,7 +213,7 @@ class LisaClientFactory(ReconnectingClientFactory):
     #-----------------------------------------------------------------------------
     def clientConnectionLost(self, connector, reason):
         # Retry connection
-        log.err('Lost connection.  Reason:', reason.getErrorMessage())
+        log.err('Lost connection.  Reason: {0}'.format(reason.getErrorMessage()))
         ReconnectingClientFactory.clientConnectionLost(self, connector, reason)
 
     #-----------------------------------------------------------------------------
@@ -227,7 +227,7 @@ class LisaClientFactory(ReconnectingClientFactory):
 
         # Retry
         self.resetDelay()
-        log.err('Connection failed. Reason:', reason.getErrorMessage())
+        log.err('Connection failed. Reason: {0}'.format(reason.getErrorMessage()))
         ReconnectingClientFactory.clientConnectionFailed(self, connector, reason)
 
 
