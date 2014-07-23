@@ -26,12 +26,5 @@ pip-log.txt
 nosetests.xml
 
 # Translations
-*.mo
-
-# Mr Developer
-.mr.developer.cfg
-.project
-.pydevproject
-neo*
-lium_french_*
-hub4wsj_sc_8k
+*.pot
+*~
