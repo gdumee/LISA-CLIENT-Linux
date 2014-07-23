@@ -138,7 +138,10 @@ class LisaClient(LineReceiver):
 
                     # Set recorder in continuous mode
                     if datajson.has_key('nolistener') == False and self.recorder:
-                        self.recorder.set_continuous_mode(True)
+                        wit_context = {}
+                        if datajson.has_key('wit_context') == True:
+                            wit_context = datajson['wit_context']
+                        self.recorder.set_continuous_mode(enabled = True, wit_context = wit_context)
 
                 elif datajson['command'] == 'kws':
                     if datajson.has_key('nolistener') == False and datajson.has_key('message'):
@@ -146,7 +149,10 @@ class LisaClient(LineReceiver):
 
                     # Set KWS mode
                     if datajson.has_key('nolistener') == False and self.recorder:
-                        self.recorder.set_continuous_mode(False)
+                        wit_context = {}
+                        if datajson.has_key('wit_context') == True:
+                            wit_context = datajson['wit_context']
+                        self.recorder.set_continuous_mode(enabled = False, wit_context = wit_context)
 
         else:
             # Send to TTS queue
