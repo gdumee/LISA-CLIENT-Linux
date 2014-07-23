@@ -128,7 +128,7 @@ class Speaker(threading.Thread):
 
             # Pico TTS
             if self.engine == "pico":
-                call(['/usr/bin/pico2wave', '-w', filename, '-l', self.lang, '"' + data.encode('utf8') + '"'])
+                call(['/usr/bin/pico2wave', '-w', filename, '-l', self.lang, '"' + data + '"'])
 
             # VoiceRSS
             elif self.engine == "voicerss":
@@ -141,10 +141,10 @@ class Speaker(threading.Thread):
 
             # Play synthetized file
             if os.path.exists(filename):
-                log.msg(self._("playing_TTS"))
+                log.msg("Playing generated TTS")
                 Player.play_block(sound = filename, path = soundpath, ext = self.ext)
             else:
-                log.msg(self._("error_generate_TTS").format(filename = filename))
+                log.msg("Error while generating TTS file : {filename}".format(filename = filename))
 
             # Remove message from queue
             self.queue.task_done()
