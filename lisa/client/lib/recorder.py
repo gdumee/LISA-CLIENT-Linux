@@ -56,6 +56,7 @@ class Recorder(threading.Thread):
         self.configuration = ConfigManagerSingleton.get().getConfiguration()
         self.wit = Wit(self.configuration['wit_token'])
         self.wit_confidence = 0.5
+        self.wit_context = {}
         if self.configuration.has_key('confidence'):
             self.wit_confidence = self.configuration['wit_confidence']
         self.record = {'activated' : False, 'start' : 0, 'started' : False, 'end' : 0, 'ended' : False, 'buffers' : deque({})}
@@ -86,12 +87,13 @@ class Recorder(threading.Thread):
             self.record['activated'] = True
 
     #-----------------------------------------------------------------------------
-    def set_continuous_mode(self, mode):
+    def set_continuous_mode(self, enabled, wit_context = {}):
         """
         Called to activate continous record mode
         """
         # Activate record
-        self.continuous_mode = mode
+        self.continuous_mode = enabled
+        self.wit_context = wit_context
 
     #-----------------------------------------------------------------------------
     def run(self):
@@ -119,7 +121,7 @@ class Recorder(threading.Thread):
                 self.record['ended'] = True
 
             # If current record is not activated
-            if self.record['activated'] == False and self.continuous_mode == False:
+            if self.record['started'] == False or (self.record['activated'] == False and self.continuous_mode == False):
                 sleep(.1)
                 continue
 
@@ -129,7 +131,7 @@ class Recorder(threading.Thread):
             result = ""
             try:
                 if use_wit_audio == True:
-                    result = self.wit.post_speech(data = self._read_audio_buffer(), content_type = CONTENT_TYPE)
+                    result = self.wit.post_speech(data = self._read_audio_buffer(), content_type = CONTENT_TYPE, context = self.wit_context)
                 else:
                     self._read_audio_buffer(file_mode = True)
                         
