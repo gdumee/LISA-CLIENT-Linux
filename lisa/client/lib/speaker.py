@@ -123,7 +123,7 @@ class Speaker(threading.Thread):
                 continue
 
             # Get translated message
-            data = self._(self.queue.get())
+            data = self._(self.queue.get()).encode('utf-8')
             filename = "{path}{file}.{ext}".format(path = soundpath, file = soundfile, ext = self.ext)
 
             # Pico TTS
