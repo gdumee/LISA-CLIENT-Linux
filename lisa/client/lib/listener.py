@@ -66,6 +66,9 @@ class Listener(threading.Thread):
         self.keyword_score = -10000
         if configuration.has_key("keyword_score"):
             self.keyword_score = configuration['keyword_score']
+        self.asr_engine = "wit"
+        if configuration.has_key('asr'):
+            self.asr_engine = configuration['asr']
 
         # Find client path
         if os.path.isdir('/var/lib/lisa/client/pocketsphinx'):
@@ -74,30 +77,24 @@ class Listener(threading.Thread):
             client_path = "{0}/pocketsphinx".format(PWD)
 
         # Build Gstreamer pipeline
+        if self.asr_engine == "ispeech":
+            enc_str = 'speexenc mode=2'
+        elif self.asr_engine == "google":
+            enc_str = 'flacenc'
+        # Default Wit
+        else:
+            enc_str = 'lamemp3enc bitrate=16 mono=true'
         pipeline = 'pulsesrc' \
                     + ' ! tee name=audio_tee' \
                     + ' audio_tee.' \
                     + ' ! queue ! audiodynamic characteristics=soft-knee mode=compressor threshold=0.5 ratio=0.5 ! audioconvert ! audioresample' \
                     + ' ! audio/x-raw-int, format=(string)S16_LE, channels=1, rate=16000' \
-                    + ' ! lamemp3enc bitrate=16 mono=true' \
+                    + ' ! ' + enc_str \
                     + ' ! appsink name=rec_sink emit-signals=true async=false' \
                     + ' audio_tee.' \
                     + ' ! queue ! audiocheblimit mode=1 cutoff=150' \
                     + ' ! audiodynamic ! audioconvert ! audioresample' \
                     + ' ! tee name=asr_tee'
-        """pipeline = 'pulsesrc' \
-                    + ' ! tee name=audio_tee' \
-                    + ' audio_tee.' \
-                    + ' ! queue ! audiodynamic characteristics=soft-knee mode=compressor threshold=0.5 ratio=0.5 ! audioconvert ! audioresample' \
-                    + ' ! audio/x-raw-int, format=(string)S16_LE, channels=1, rate=16000' \
-                    + ' ! flacenc' \
-                    + ' ! appsink name=rec_sink emit-signals=true async=false' \
-                    + ' audio_tee.' \
-                    + ' ! queue ! audiocheblimit mode=1 cutoff=150' \
-                    + ' ! audiodynamic ! audioconvert ! audioresample' \
-                    + ' ! tee name=asr_tee'
-        """
-        #TODO FLAC
         
         # Add pocketsphinx
         for i in range(NUM_PIPES):
