@@ -17,12 +17,15 @@ from lisa.client.ConfigManager import ConfigManagerSingleton
 from lisa.client.lib.player import Player
 from collections import deque
 import threading
+import base64
 from wit import Wit
+import requests
 import time
 from time import sleep,time
 from twisted.python import log
 import urllib2
 from urllib2 import Request, urlopen
+from urllib import urlencode
 from subprocess import call
 from json import loads
 
@@ -59,8 +62,12 @@ class Recorder(threading.Thread):
         self.wit_context = {}
         if self.configuration.has_key('confidence'):
             self.wit_confidence = self.configuration['wit_confidence']
+        self.asr_engine = "wit"
+        if self.configuration.has_key('asr'):
+            self.asr_engine = self.configuration['asr']
         self.record = {'activated' : False, 'start' : 0, 'started' : False, 'end' : 0, 'ended' : False, 'buffers' : deque({})}
         self.continuous_mode = False
+        self.temp_file = "/tmp/asr_sound"
 
     #-----------------------------------------------------------------------------
     def start(self, listener):
@@ -124,24 +131,41 @@ class Recorder(threading.Thread):
             if self.record['started'] == False or (self.record['activated'] == False and self.continuous_mode == False):
                 sleep(.1)
                 continue
-
+            
             # Send activated record to Wit
             wit_e = None
-            use_wit_audio = True
             result = ""
             try:
-                if use_wit_audio == True:
-                    result = self.wit.post_speech(data = self._read_audio_buffer(), content_type = CONTENT_TYPE, context = self.wit_context)
-                else:
-                    self._read_audio_buffer(file_mode = True)
-                        
+                if self.asr_engine == "ispeech":
+                    for b in self._read_audio_buffer(file_mode = True):
+                        pass
+                    params= {}
+                    params["action"] = "recognize"
+                    params["apikey"] = "developerdemokeydeveloperdemokey"
+                    params["freeform"] = "3"
+                    params["locale"] = "fr-FR"
+                    params["output"] = "json"
+                    params["content-type"] = "speex"
+                    params["speexmode"] = "2"
+                    params["audio"] = base64.b64encode(open(self.temp_file, 'rt').read()).replace(b'\n',b'')
+                    result = requests.get("http://api.ispeech.org/api/rest?" + urlencode(params))
+                    print result
+
+                    result = self.wit.get_message(result.json()['text'])
+                    
+                elif self.asr_engine == "google":
+                    for b in self._read_audio_buffer(file_mode = True):
+                        pass
                     url = 'https://www.google.com/speech-api/v2/recognize?output=json&lang=fr-fr&key=AIzaSyCQv4U1mTaw_r_j1bWb1peeaTihzV0q-EQ'
-                    file_upload = "/tmp/a.flac"
-                    audio = open(file_upload, "rb").read()
+                    audio = open(self.temp_file, "rb").read()
                     header = {"Content-Type": "audio/x-flac; rate=16000"}
                     post = urlopen(Request(url, audio, header))
                     result = loads(post.read().split("\n")[1])['result'][0]['alternative'][0]['transcript']
                     result = self.wit.get_message(result)
+                
+                # Defautl Wit
+                else:
+                    result = self.wit.post_speech(data = self._read_audio_buffer(), content_type = CONTENT_TYPE, context = self.wit_context)
 
                 result['msg_body'] = result['msg_body'].encode("utf-8")
             except Exception as e:
@@ -238,7 +262,7 @@ class Recorder(threading.Thread):
 
         f = None
         if file_mode == True:
-            f = open("/tmp/a.flac", "wb")
+            f = open(self.temp_file, "wb")
         
         # While recording is running
         log.msg("Wit send start")
@@ -265,10 +289,9 @@ class Recorder(threading.Thread):
                     buf = data['data']
                 else:
                     buf = buf.merge(data['data'])
-            if file_mode == False:
-                yield buf
-            else:
+            if file_mode == True:
                 f.write(buf)
+            yield buf
 
         if file_mode == True:
             f.close()
