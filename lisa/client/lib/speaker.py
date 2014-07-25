@@ -13,8 +13,7 @@
 #-----------------------------------------------------------------------------
 # Imports
 #-----------------------------------------------------------------------------
-from lisa.client.ConfigManager import ConfigManagerSingleton
-from lisa.Neotique.NeoTrans import NeoTrans
+from lisa.client.ConfigManager import ConfigManager
 import threading
 import os
 from lisa.client.lib.player import Player
@@ -33,9 +32,6 @@ from twisted.python import log
 soundfile = 'tts-output'
 soundpath = '/tmp/'
 
-configuration = ConfigManagerSingleton.get().getConfiguration()
-path = '/'.join([ConfigManagerSingleton.get().getPath(), 'lang'])
-
 
 #-----------------------------------------------------------------------------
 # Speaker
@@ -51,41 +47,25 @@ class Speaker(threading.Thread):
     _engines = type('Enum', (), dict({"pico": 1, "voicerss": 2}))
 
     #-----------------------------------------------------------------------------
-    def __init__(self):
+    def __init__(self, listener):
         if self.__instance is not None:
             raise Exception("Singleton can't be created twice !")
 
         # Init thread class
         threading.Thread.__init__(self)
         self._stopevent = threading.Event()
-        self.configuration = ConfigManagerSingleton.get().getConfiguration()
-
+        self.configuration = ConfigManager.getConfiguration()
         self.queue = Queue([])
-        self.lang = "en-EN"
-        if self.configuration.has_key('lang'):
-            self.lang = self.configuration['lang']
-        if self.configuration.has_key("tts") == False or self.configuration["tts"].lower() == "pico" or self.configuration["tts"].lower() == "picotts":
-            self.engine = "pico"
-            self.ext = "wav"
-        elif self.configuration["tts"].lower() == "voicerss" and "voicerss_key" in self.configuration:
-            self.engine = "voicerss"
-            self.ext = "ogg"
-            self.voicerss_key = self.configuration["voicerss_key"]
-        else:
-            Player.play_block("error_conf")
-            return
-        
-        # Translation function
-        self._ = NeoTrans(domain = 'lisa', localedir = path, fallback = True, languages = [self.lang.split('-')[0]]).Trans
+        self.listener = listener
 
         # Start thread
         threading.Thread.start(self)
 
     #-----------------------------------------------------------------------------
-    def _start(self):
+    def _start(self, listener):
         # Create singleton
         if self.__instance is None:
-            self.__instance = Speaker()
+            self.__instance = Speaker(listener)
     start = classmethod(_start)
 
     #-----------------------------------------------------------------------------
@@ -123,26 +103,28 @@ class Speaker(threading.Thread):
                 continue
 
             # Get translated message
-            data = self._(self.queue.get()).encode('utf-8')
-            filename = "{path}{file}.{ext}".format(path = soundpath, file = soundfile, ext = self.ext)
+            data = self.queue.get().encode('utf-8')
+            filename = "{path}{file}.{ext}".format(path = soundpath, file = soundfile, ext = self.configuration['tts_ext'])
 
             # Pico TTS
-            if self.engine == "pico":
-                call(['/usr/bin/pico2wave', '-w', filename, '-l', self.lang, '"' + data + '"'])
+            if self.configuration["tts"] == "pico":
+                call(['/usr/bin/pico2wave', '-w', filename, '-l', self.configuration['lang'], '"' + data + '"'])
 
             # VoiceRSS
-            elif self.engine == "voicerss":
-                urllib.urlretrieve("http://api.voicerss.org/?%s".format(urlencode({ "c": self.ext.upper(),
+            elif self.configuration["tts"] == "voicerss":
+                urllib.urlretrieve("http://api.voicerss.org/?%s".format(urlencode({ "c": self.configuration['tts_ext'].upper(),
                                                                                     "r": 1,
                                                                                     "f": "16khz_16bit_mono",
-                                                                                    "key": self.voicerss_key,
+                                                                                    "key": self.configuration["voicerss_key"],
                                                                                     "src": data,
-                                                                                    "hl": self.lang}), filename))
+                                                                                    "hl": self.configuration['lang']}), filename))
 
             # Play synthetized file
             if os.path.exists(filename):
                 log.msg("Playing generated TTS")
-                Player.play_block(sound = filename, path = soundpath, ext = self.ext)
+                self.listener.setRunningState(False)
+                Player.playBlock(sound = filename, path = soundpath, ext = self.configuration['tts_ext'])
+                self.listener.setRunningState(True)
             else:
                 log.msg("Error while generating TTS file : {filename}".format(filename = filename))
 
