@@ -13,7 +13,7 @@
 #-----------------------------------------------------------------------------
 # Imports
 #-----------------------------------------------------------------------------
-from lisa.client.ConfigManager import ConfigManager
+from lisa.client.config_manager import ConfigManager
 import threading
 import os
 from lisa.client.lib.player import Player
@@ -120,7 +120,7 @@ class Speaker(threading.Thread):
                                                                                     "hl": self.configuration['lang']}), filename))
 
             # Play synthetized file
-            if os.path.exists(filename):
+            if os.path.isfile(filename):
                 log.msg("Playing generated TTS")
                 self.listener.setRunningState(False)
                 Player.playBlock(sound = filename, path = soundpath, ext = self.configuration['tts_ext'])

@@ -36,7 +36,7 @@ from twisted.application.internet import TCPClient
 from twisted.protocols.basic import LineReceiver
 from twisted.application import internet, service
 from twisted.internet import reactor
-from lisa.client.ConfigManager import ConfigManager
+from lisa.client.config_manager import ConfigManager
 import json, os
 from OpenSSL import SSL
 
@@ -44,6 +44,10 @@ from OpenSSL import SSL
 #-----------------------------------------------------------------------------
 # Globals
 #-----------------------------------------------------------------------------
+# Creating MultiService
+application = service.Application("LISA-Client")
+
+# Client protocol factory
 LisaFactory = None
 
 
@@ -246,7 +250,7 @@ class LisaClientFactory(ReconnectingClientFactory):
 
 
 #-----------------------------------------------------------------------------
-# LisaClientFactory
+# ClientTLSContext
 #-----------------------------------------------------------------------------
 class ClientTLSContext(ssl.ClientContextFactory):
     isClient = 1
@@ -255,20 +259,17 @@ class ClientTLSContext(ssl.ClientContextFactory):
 
 
 #-----------------------------------------------------------------------------
-# LisaClientFactory
+# ClientAuthContextFactory
 #-----------------------------------------------------------------------------
-class CtxFactory(ssl.ClientContextFactory):
+class ClientAuthContextFactory(ssl.ClientContextFactory):
     def getContext(self):
         self.method = SSL.SSLv23_METHOD
         ctx = ssl.ClientContextFactory.getContext(self)
         configuration = ConfigManager.getConfiguration()
-        ctx.use_certificate_file(os.path.normpath(configuration['path'] + '/configuration/ssl/client.crt'))
-        ctx.use_privatekey_file(os.path.normpath(configuration['path'] + '/configuration/ssl/client.key'))
+        ctx.use_certificate_file(configuration['lisa_engine_ssl_crt'])
+        ctx.use_privatekey_file(configuration['lisa_engine_ssl_key'])
         return ctx
 
-
-# Creating MultiService
-application = service.Application("LISA-Client")
 
 #-----------------------------------------------------------------------------
 # Handle Ctrl-C
@@ -311,12 +312,12 @@ def makeService(config):
     # Create factory
     LisaFactory = LisaClientFactory()
 
-    # Start client
+    # Start client factory
     configuration = ConfigManager.getConfiguration()
     if configuration['enable_secure_mode'] == True:
-        lisaclientService = internet.TCPClient(configuration['lisa_url'], configuration['lisa_engine_port_ssl'], LisaFactory, CtxFactory())
+        lisaclientService = internet.SSLClient(configuration['lisa_url'], configuration['lisa_port'], LisaFactory, ClientAuthContextFactory())
     else:
-        lisaclientService = internet.TCPClient(configuration['lisa_url'], configuration['lisa_engine_port'], LisaFactory)
+        lisaclientService = internet.TCPClient(configuration['lisa_url'], configuration['lisa_port'], LisaFactory)
     lisaclientService.setServiceParent(multi)
 
     return multi

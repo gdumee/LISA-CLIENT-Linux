@@ -34,4 +34,4 @@ msgid "generating_TTS"
 msgstr "Generating {filename} : '{message}'"
 
 msgid "back_ready"
-msgstr  ""
+msgstr  "I'm back"

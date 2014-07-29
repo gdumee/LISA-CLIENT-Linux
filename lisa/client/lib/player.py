@@ -16,7 +16,7 @@
 import gst
 import os
 import gobject
-from lisa.client.ConfigManager import ConfigManager
+from lisa.client.config_manager import ConfigManager
 gobject.threads_init()
 
 

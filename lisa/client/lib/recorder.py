@@ -13,7 +13,7 @@
 #-----------------------------------------------------------------------------
 # Imports
 #-----------------------------------------------------------------------------
-from lisa.client.ConfigManager import ConfigManager
+from lisa.client.config_manager import ConfigManager
 from lisa.client.lib.player import Player
 from collections import deque
 import threading
