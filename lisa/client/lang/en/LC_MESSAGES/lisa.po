@@ -32,3 +32,6 @@ msgstr "There was an error creating the output file {filename}"
 
 msgid "generating_TTS"
 msgstr "Generating {filename} : '{message}'"
+
+msgid "back_ready"
+msgstr  ""

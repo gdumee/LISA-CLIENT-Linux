@@ -29,15 +29,13 @@ except:
 import pocketsphinx
 from twisted.python import log
 from lisa.client.lib.speaker import Speaker
-from lisa.client.ConfigManager import ConfigManagerSingleton
+from lisa.client.lib.recorder import Recorder
+from lisa.client.ConfigManager import ConfigManager
 
 
 #-----------------------------------------------------------------------------
 # Globals
 #-----------------------------------------------------------------------------
-# Current path
-PWD = os.path.dirname(os.path.abspath(__file__))
-
 # Global configuration
 NUM_PIPES = 2
 VADER_MAX_LENGTH = 1
@@ -51,35 +49,51 @@ class Listener(threading.Thread):
     The goal is to listen for a keyword, then it starts a voice recording
     """
 
-    def __init__(self, lisa_client):
+    #-----------------------------------------------------------------------------
+    def __init__(self, factory):
         # Init thread class
         threading.Thread.__init__(self)
         self._stopevent = threading.Event()
 
-        configuration = ConfigManagerSingleton.get().getConfiguration()
-        self.botname = lisa_client.botname.lower()
+        self.configuration = ConfigManager.getConfiguration()
+        self._ = self.configuration['trans']
+        self.factory = factory
+        self.botname = ""
         self.scores = []
-        self.pipes = []
-        self.recorder = None
-        for i in range(NUM_PIPES):
-            self.pipes.append({'vad' : None, 'ps' : None, 'start' : 0})
-        self.keyword_score = -10000
-        if configuration.has_key("keyword_score"):
-            self.keyword_score = configuration['keyword_score']
-        self.asr_engine = "wit"
-        if configuration.has_key('asr'):
-            self.asr_engine = configuration['asr']
+        self.recorder = Recorder(factory = factory)
+        self.running_state = False
 
         # Find client path
         if os.path.isdir('/var/lib/lisa/client/pocketsphinx'):
-            client_path = '/var/lib/lisa/client/pocketsphinx'
+            self.client_path = '/var/lib/lisa/client/pocketsphinx'
         else:
-            client_path = "{0}/pocketsphinx".format(PWD)
+            self.client_path = "{0}/lib/pocketsphinx".format(self.configuration['path'])
+
+        # Initialize with a default bot name
+        self.setBotName("neo")
+
+        # Start thread
+        threading.Thread.start(self)
+
+    #-----------------------------------------------------------------------------
+    def setBotName(self, botname):
+        # If nothing to do
+        if botname == self.botname:
+            return
+        self.botname = botname
+
+        # Pause thread
+        self.setRunningState(state = False)
+
+        # Init pipes
+        self.pipes = []
+        for i in range(NUM_PIPES):
+            self.pipes.append({'vad' : None, 'ps' : None, 'timeout' : 0})
 
         # Build Gstreamer pipeline
-        if self.asr_engine == "ispeech":
+        if self.configuration['asr'] == "ispeech":
             enc_str = 'speexenc mode=2'
-        elif self.asr_engine == "google":
+        elif self.configuration['asr'] == "google":
             enc_str = 'flacenc'
         # Default Wit
         else:
@@ -95,7 +109,7 @@ class Listener(threading.Thread):
                     + ' ! queue ! audiocheblimit mode=1 cutoff=150' \
                     + ' ! audiodynamic ! audioconvert ! audioresample' \
                     + ' ! tee name=asr_tee'
-        
+
         # Add pocketsphinx
         for i in range(NUM_PIPES):
             pipeline = pipeline \
@@ -111,52 +125,64 @@ class Listener(threading.Thread):
         for i in range(NUM_PIPES):
             # Initialize vader
             vader = self.pipeline.get_by_name('vad_{0}'.format(i))
-            vader.connect('vader-start', self._vader_start, i)
-            vader.connect('vader-stop', self._vader_stop, i)
+            vader.connect('vader-start', self._vaderStart, i)
+            vader.connect('vader-stop', self._vaderStop, i)
             self.pipes[i]['vad'] = vader
 
             # Initialize pocketsphinx
             asr = self.pipeline.get_by_name('asr_{0}'.format(i))
-            asr.set_property("dict", "{path}/{bot}.dic".format(path = client_path, bot = self.botname))
-            asr.set_property("lm", "{path}/{bot}.lm".format(path = client_path, bot = self.botname))
-            if configuration.has_key("hmm"):
-                if os.path.isdir(configuration["hmm"]):
-                    asr.set_property("hmm", configuration["hmm"])
+            asr.set_property("dict", "{path}/{bot}.dic".format(path = self.client_path, bot = self.botname))
+            asr.set_property("lm", "{path}/{bot}.lm".format(path = self.client_path, bot = self.botname))
+            if self.configuration.has_key("hmm"):
+                if os.path.isdir(self.configuration["hmm"]):
+                    asr.set_property("hmm", self.configuration["hmm"])
                 else:
-                    hmm_path = "{path}/{hmm}".format(path = client_path, hmm = configuration["hmm"])
+                    hmm_path = "{path}/{hmm}".format(path = self.client_path, hmm = self.configuration["hmm"])
                     if os.path.isdir(hmm_path):
                         asr.set_property("hmm", hmm_path)
-            asr.connect('result', self._asr_result, i)
+            asr.connect('result', self._asrResult, i)
             asr.set_property('configured', 1)
             self.pipes[i]['ps'] = pocketsphinx.Decoder(boxed = asr.get_property('decoder'))
 
-    #-----------------------------------------------------------------------------
-    def start(self, recorder):
-        # Get recorder
-        self.recorder = recorder
+        # Start pipeline
+        self.pipeline.set_state(gst.STATE_PLAYING)
 
-        # Start thread
-        threading.Thread.start(self)
+        # Restart
+        self.setRunningState(state = True)
+
+    #-----------------------------------------------------------------------------
+    def setRunningState(self, state):
+        if state == True:
+            # Restart
+            self.running_state = True
+            self.recorder.setRunningState(state = True, rec_sink = self.pipeline.get_by_name('rec_sink'))
+        else:
+            # Pause thread
+            self.running_state = False
+            self.recorder.setRunningState(state = False)
+
+    #-----------------------------------------------------------------------------
+    def setContinuousMode(self, enabled, wit_context = None):
+        # Change continuous mode in recorder
+        self.recorder.setContinuousMode(enabled = enabled, wit_context = wit_context)
 
     #-----------------------------------------------------------------------------
     def run(self):
         """
         Listener main loop
         """
-        Speaker.speak("ready")
-        self.pipeline.set_state(gst.STATE_PLAYING)
-
         # Thread loop
         while not self._stopevent.isSet():
-            for vader in self.pipes:
-                if vader['start'] > 0 and time() >= vader['start'] + VADER_MAX_LENGTH:
-                    # Force silent to cut current utterance
-                    vader['vad'].set_property('silent', True)
-                    vader['vad'].set_property('silent', False)
-                    
-                    # Manual start (vader_start may be not called after the foreced silence)
-                    vader['start'] = time()
-                    self.recorder.vader_start()
+            if self.running_state == True:
+                for p in self.pipes:
+                    if p['timeout'] > 0 and time() >= p['timeout']:
+                        # Force silent to cut current utterance
+                        p['vad'].set_property('silent', True)
+                        p['vad'].set_property('silent', False)
+
+                        # Manual start (vader_start may be not called after the forced silence)
+                        p['timeout'] += VADER_MAX_LENGTH
+                        self.recorder.vaderStart()
             sleep(.1)
 
         # Stop pipeline
@@ -168,40 +194,43 @@ class Listener(threading.Thread):
         """
         Stop listener.
         """
-        Speaker.speak('lost_server')
-
         # Stop everything
+        self.recorder.stop()
         self._stopevent.set()
-        self.pipeline.set_state(gst.STATE_NULL)
-        if self.recorder is not None:
-            self.recorder.stop()
 
     #-----------------------------------------------------------------------------
-    def _vader_start(self, ob, message, pipe_id):
+    def _vaderStart(self, ob, message, pipe_id):
         """
         Vader start detection
         """
-        self.pipes[pipe_id]['start'] = time()
-        self.recorder.vader_start()
+        # Vader start
+        if self.pipes[pipe_id]['timeout'] == 0:
+            self.pipes[pipe_id]['timeout'] = time() + VADER_MAX_LENGTH * (1 + pipe_id / 2.0)
+        self.recorder.vaderStart()
 
     #-----------------------------------------------------------------------------
-    def _vader_stop(self, ob, message, pipe_id):
+    def _vaderStop(self, ob, message, pipe_id):
         """
         Vader stop detection
         """
-        self.pipes[pipe_id]['start'] = 0
-        self.recorder.vader_stop()
+        # Vader stop
+        self.pipes[pipe_id]['timeout'] = 0
+        self.recorder.vaderStop()
 
     #-----------------------------------------------------------------------------
-    def _asr_result(self, asr, text, uttid, pipe_id):
+    def _asrResult(self, asr, text, uttid, pipe_id):
         """
         Result from pocketsphinx : checking keyword recognition
         """
+        # When not running
+        if self.running_state == False:
+            return
+
         # Get score from decoder
         dec_text, dec_uttid, dec_score = self.pipes[pipe_id]['ps'].get_hyp()
 
         # Detection must have a minimal score to be valid
-        if dec_score != 0 and dec_score < self.keyword_score:
+        if dec_score != 0 and dec_score < self.configuration['keyword_score']:
             log.msg("I recognized the {word} keyword but I think it's a false positive according the {score} score".format(word = self.botname, score = dec_score))
             return
 
@@ -213,12 +242,5 @@ class Listener(threading.Thread):
         log.msg("======================")
         log.msg("{word} keyword detected".format(word = self.botname))
         log.msg("score: {score} (min {min}, moy {moy}, max {max})".format(score = dec_score, min = min(self.scores), moy = sum(self.scores) / len(self.scores), max = max(self.scores)))
-
-    #-----------------------------------------------------------------------------
-    def get_pipeline(self):
-        """
-        Return Gstreamer pipeline
-        """
-        return self.pipeline
 
 # --------------------- End of listener.py  ---------------------

@@ -26,7 +26,6 @@ try:
     from lisa.client import lib
     from lib import Listener
     from lib import Player
-    from lib import Recorder
     from lib import Speaker
 except:
     gobjectnotimported = True
@@ -37,17 +36,14 @@ from twisted.application.internet import TCPClient
 from twisted.protocols.basic import LineReceiver
 from twisted.application import internet, service
 from twisted.internet import reactor
-from lisa.client.ConfigManager import ConfigManagerSingleton
+from lisa.client.ConfigManager import ConfigManager
 import json, os
 from OpenSSL import SSL
-import platform
 
 
 #-----------------------------------------------------------------------------
 # Globals
 #-----------------------------------------------------------------------------
-PWD = os.path.dirname(os.path.abspath(__file__))
-configuration = None
 LisaFactory = None
 
 
@@ -58,10 +54,10 @@ class LisaClient(LineReceiver):
     """
     Lisa TCP client
     """
-    def __init__(self):
-        self.factory = None
-        self.configuration = ConfigManagerSingleton.get().getConfiguration()
-        self.listener = None
+    def __init__(self, factory):
+        self.factory = factory
+        self.configuration = ConfigManager.getConfiguration()
+
         self.debug_input = False
         self.debug_output = False
         if self.configuration.has_key("debug"):
@@ -69,16 +65,15 @@ class LisaClient(LineReceiver):
                 self.debug_input = self.configuration["debug"]["debug_input"]
             if self.configuration["debug"].has_key("debug_output"):
                 self.debug_output = self.configuration["debug"]["debug_output"]
-        self.name = platform.node()
-        self.zone = ""
-        if self.configuration.has_key("zone"):
-            self.zone = self.configuration['zone']
+
+        self.name = self.configuration['client_name']
+        self.zone = self.configuration['zone']
 
     #-----------------------------------------------------------------------------
     def sendToServer(self, jsonData):
         # Add info to json
-        jsonData['from'] = self.name,
-        jsonData['zone'] = self.zone,
+        jsonData['from'] = self.name
+        jsonData['zone'] = self.zone
         jsonData['to'] = 'Server'
 
         if self.debug_output:
@@ -88,8 +83,10 @@ class LisaClient(LineReceiver):
         self.sendLine(json.dumps(jsonData))
 
     #-----------------------------------------------------------------------------
-    def sendChat(self, message, outcome = None):
-        json = {'type': 'chat', 'message': message, 'outcome': outcome}
+    def sendChatToServer(self, message, outcome = None):
+        json = {'type': 'chat', 'message': message}
+        if outcome is not None:
+            json['outcome'] = outcome
         self.sendToServer(json)
 
     #-----------------------------------------------------------------------------
@@ -117,47 +114,36 @@ class LisaClient(LineReceiver):
                 datajson['command'] = datajson['command'].lower()
                 if datajson['command'] == 'login ack':
                     # Get Bot name
-                    botname = datajson['bot_name']
+                    botname = datajson['bot_name'].lower()
                     log.msg("setting botname to {0}".format(botname))
-                    self.botname = botname
-
-                    # Send TTS
-                    if datajson.has_key('nolistener') == False:
-                        # Create
-                        self.listener = Listener(lisa_client = self)
-                        self.recorder = Recorder(lisa_client = self)
-                        
-                        # Start
-                        Speaker.start()
-                        self.listener.start(self.recorder)
-                        self.recorder.start(self.listener)
+                    self.factory.setBotName(botname)
 
                 elif datajson['command'] == 'ask':
                     if datajson.has_key('nolistener') == False and datajson.has_key('message'):
                         Speaker.speak(datajson['message'])
 
-                    # Set recorder in continuous mode
-                    if datajson.has_key('nolistener') == False and self.recorder:
-                        wit_context = {}
+                    # Set continuous mode
+                    if datajson.has_key('nolistener') == False:
+                        wit_context = None
                         if datajson.has_key('wit_context') == True:
                             wit_context = datajson['wit_context']
-                        self.recorder.set_continuous_mode(enabled = True, wit_context = wit_context)
+                        self.factory.setContinuousMode(enabled = True, wit_context = wit_context)
 
                 elif datajson['command'] == 'kws':
                     if datajson.has_key('nolistener') == False and datajson.has_key('message'):
                         Speaker.speak(datajson['message'])
 
                     # Set KWS mode
-                    if datajson.has_key('nolistener') == False and self.recorder:
-                        wit_context = {}
+                    if datajson.has_key('nolistener') == False:
+                        wit_context = None
                         if datajson.has_key('wit_context') == True:
                             wit_context = datajson['wit_context']
-                        self.recorder.set_continuous_mode(enabled = False, wit_context = wit_context)
+                        self.factory.setContinuousMode(enabled = False, wit_context = wit_context)
 
         else:
             # Send to TTS queue
-            if datajson.has_key('nolistener') == False:
-                Speaker.speak(datajson['body'])
+            if datajson.has_key('nolistener') == False and datajson.has_key('message'):
+                Speaker.speak(datajson['message'])
 
     #-----------------------------------------------------------------------------
     def connectionMade(self):
@@ -167,23 +153,13 @@ class LisaClient(LineReceiver):
         log.msg('Connected to the server.')
 
         # Set SSL encryption
-        if self.configuration.has_key('enable_secure_mode') and self.configuration['enable_secure_mode'] == True:
+        if self.configuration['enable_secure_mode'] == True:
             ctx = ClientTLSContext()
             self.transport.startTLS(ctx, self.factory)
 
         # Login to server
         json = {'type': 'command', 'command': "login req"}
         self.sendToServer(json)
-
-    #-----------------------------------------------------------------------------
-    def connectionLost(self, reason):
-        """
-        Callback on connection loss
-        """
-        # Stop listener
-        log.msg("Lost connection with server : {0}".format(reason.getErrorMessage()))
-        if self.listener:
-            self.listener.stop()
 
 
 #-----------------------------------------------------------------------------
@@ -193,48 +169,80 @@ class LisaClientFactory(ReconnectingClientFactory):
     # Create protocol
     active_protocol = None
 
-    # Warn about failure on first connection to the server
-    first_time = True
+    #-----------------------------------------------------------------------------
+    def __init__(self):
+        self.configuration = ConfigManager.getConfiguration()
+        self._ = self.configuration['trans']
+        self.active_protocol = None
+        self.warn_on_connect = False
+        self.running_state = True
+        self.listener = None
 
     #-----------------------------------------------------------------------------
-    def Init(self):
-        self.configuration = ConfigManagerSingleton.get().getConfiguration()
+    def setBotName(self, botname):
+        # Restart listener with new botname
+        self.listener.setBotName(botname)
 
     #-----------------------------------------------------------------------------
-    def startedConnecting(self, connector):
-        pass
+    def sendChatToServer(self, message, outcome = None):
+        # If not connected to the server
+        if self.active_protocol is None:
+            Speaker.speak(self._('no_server'))
+            self.warn_on_connect = True
+            return
+
+        # Send chat to server
+        self.active_protocol.sendChatToServer(message = message, outcome = outcome)
+
+    #-----------------------------------------------------------------------------
+    def setContinuousMode(self, enabled, wit_context = None):
+        # Change continuous mode in recorder
+        self.listener.setContinuousMode(enabled = enabled, wit_context = wit_context)
 
     #-----------------------------------------------------------------------------
     def buildProtocol(self, addr):
+        # Create workers
+        if self.listener is None:
+            self.listener = Listener(factory = self)
+            Speaker.start(listener = self.listener)
+
         # Reset retry delay
         self.resetDelay()
 
-        # We don't need a "no connection" warning anymore
-        self.first_time = False
+        # Warn on connection
+        if self.warn_on_connect == True:
+            Speaker.speak(self._('back_ready'))
+            self.warn_on_connect = False
 
         # Return protocol
-        self.active_protocol = LisaClient()
+        self.active_protocol = LisaClient(factory = self)
         return self.active_protocol
 
     #-----------------------------------------------------------------------------
     def clientConnectionLost(self, connector, reason):
-        # Retry connection
+        # Delete current connection
+        self.active_protocol = None
+
+        # Retry connection to the server
         log.err('Lost connection.  Reason: {0}'.format(reason.getErrorMessage()))
-        ReconnectingClientFactory.clientConnectionLost(self, connector, reason)
+        if self.running_state == True:
+            ReconnectingClientFactory.clientConnectionLost(self, connector, reason)
 
     #-----------------------------------------------------------------------------
     def clientConnectionFailed(self, connector, reason):
-        # Warn on first failure
-        if self.first_time == True:
-            Speaker.start()
-            Speaker.speak("no_server")
-            Speaker.stop()
-            self.first_time = False
-
         # Retry
         self.resetDelay()
         log.err('Connection failed. Reason: {0}'.format(reason.getErrorMessage()))
-        ReconnectingClientFactory.clientConnectionFailed(self, connector, reason)
+        if self.running_state == True:
+            ReconnectingClientFactory.clientConnectionFailed(self, connector, reason)
+
+    #-----------------------------------------------------------------------------
+    def stop(self):
+        # Stop workers
+        self.running_state = False
+        self.listener.stop()
+        self.listener = None
+        Speaker.stop()
 
 
 #-----------------------------------------------------------------------------
@@ -253,8 +261,9 @@ class CtxFactory(ssl.ClientContextFactory):
     def getContext(self):
         self.method = SSL.SSLv23_METHOD
         ctx = ssl.ClientContextFactory.getContext(self)
-        ctx.use_certificate_file(os.path.normpath(PWD + '/configuration/ssl/client.crt'))
-        ctx.use_privatekey_file(os.path.normpath(PWD + '/configuration/ssl/client.key'))
+        configuration = ConfigManager.getConfiguration()
+        ctx.use_certificate_file(os.path.normpath(configuration['path'] + '/configuration/ssl/client.crt'))
+        ctx.use_privatekey_file(os.path.normpath(configuration['path'] + '/configuration/ssl/client.key'))
         return ctx
 
 
@@ -271,13 +280,13 @@ def sigint_handler(signum, frame):
     signal.signal(signal.SIGINT, signal.SIG_DFL)
 
     # Stop factory
-    LisaFactory.stopTrying()
+    if LisaFactory is not None:
+        LisaFactory.stop()
+        LisaFactory = None
 
     # Stop reactor
     reactor.stop()
 
-    # Stop speaker
-    Speaker.stop()
 
 #-----------------------------------------------------------------------------
 # Make twisted service
@@ -287,14 +296,10 @@ def makeService(config):
 
     # Get configuration
     if config['configuration']:
-        ConfigManagerSingleton.get().setConfiguration(config['configuration'])
-    configuration = ConfigManagerSingleton.get().getConfiguration()
-
-    # Check vital configuration
-    if configuration.has_key('lisa_url') == False or configuration.has_key('lisa_engine_port_ssl') == False:
-        Speaker.start()
-        Speaker.speak("error_conf")
-        return
+        if ConfigManager.setConfiguration(config_file = config['configuration']) == False:
+            Speaker.start()
+            Speaker.speak(ConfigManager.getConfiguration()['trans']("error_conf"))
+            return
 
     # Multiservice mode
     multi = service.MultiService()
@@ -305,10 +310,10 @@ def makeService(config):
 
     # Create factory
     LisaFactory = LisaClientFactory()
-    LisaFactory.Init()
 
     # Start client
-    if configuration.has_key('enable_secure_mode') and configuration['enable_secure_mode'] == True:
+    configuration = ConfigManager.getConfiguration()
+    if configuration['enable_secure_mode'] == True:
         lisaclientService = internet.TCPClient(configuration['lisa_url'], configuration['lisa_engine_port_ssl'], LisaFactory, CtxFactory())
     else:
         lisaclientService = internet.TCPClient(configuration['lisa_url'], configuration['lisa_engine_port'], LisaFactory)

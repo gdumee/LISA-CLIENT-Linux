@@ -13,7 +13,7 @@
 #-----------------------------------------------------------------------------
 # Imports
 #-----------------------------------------------------------------------------
-from lisa.client.ConfigManager import ConfigManagerSingleton
+from lisa.client.ConfigManager import ConfigManager
 from lisa.client.lib.player import Player
 from collections import deque
 import threading
@@ -50,34 +50,31 @@ class Recorder(threading.Thread):
     """
     Continuous recording class.
     """
-    def __init__(self, lisa_client):
+    def __init__(self, factory):
         # Init thread class
         threading.Thread.__init__(self)
         self._stopevent = threading.Event()
+        self.running_state = False
+        self.rec_sink = None
 
-        self.lisa_client = lisa_client
-        self.configuration = ConfigManagerSingleton.get().getConfiguration()
+        self.factory = factory
+        self.configuration = ConfigManager.getConfiguration()
         self.wit = Wit(self.configuration['wit_token'])
-        self.wit_confidence = 0.5
-        self.wit_context = {}
-        if self.configuration.has_key('confidence'):
-            self.wit_confidence = self.configuration['wit_confidence']
-        self.asr_engine = "wit"
-        if self.configuration.has_key('asr'):
-            self.asr_engine = self.configuration['asr']
+        self.wit_context = None
         self.record = {'activated' : False, 'start' : 0, 'started' : False, 'end' : 0, 'ended' : False, 'buffers' : deque({})}
         self.continuous_mode = False
         self.temp_file = "/tmp/asr_sound"
 
-    #-----------------------------------------------------------------------------
-    def start(self, listener):
-        # Get app sink
-        self.listener = listener
-        self.rec_sink = listener.get_pipeline().get_by_name('rec_sink')
-        self.rec_sink.connect('new-buffer', self._capture_audio_buffer)
-        
         # Start thread
         threading.Thread.start(self)
+
+    #-----------------------------------------------------------------------------
+    def setRunningState(self, state, rec_sink = None):
+        self.running_state = state
+        # Get app sink
+        if rec_sink is not None and self.rec_sink is not rec_sink:
+            self.rec_sink = rec_sink
+            self.rec_sink.connect('new-buffer', self._captureAudioBuffer)
 
     #-----------------------------------------------------------------------------
     def stop(self):
@@ -94,7 +91,7 @@ class Recorder(threading.Thread):
             self.record['activated'] = True
 
     #-----------------------------------------------------------------------------
-    def set_continuous_mode(self, enabled, wit_context = {}):
+    def setContinuousMode(self, enabled, wit_context = None):
         """
         Called to activate continous record mode
         """
@@ -121,23 +118,23 @@ class Recorder(threading.Thread):
                     self.record['end'] = 0
                     self.record['ended'] = False
                     self.record['activated'] = False
-                    
+
                     continue
-                
+
                 # Current record is activated and already ended
                 self.record['ended'] = True
 
             # If current record is not activated
-            if self.record['started'] == False or (self.record['activated'] == False and self.continuous_mode == False):
+            if self.running_state == False or self.record['started'] == False or (self.record['activated'] == False and self.continuous_mode == False):
                 sleep(.1)
                 continue
-            
+
             # Send activated record to Wit
             wit_e = None
             result = ""
             try:
-                if self.asr_engine == "ispeech":
-                    for b in self._read_audio_buffer(file_mode = True):
+                if self.configuration['asr'] == "ispeech":
+                    for b in self._readAudioBuffer(file_mode = True):
                         pass
                     params= {}
                     params["action"] = "recognize"
@@ -149,23 +146,21 @@ class Recorder(threading.Thread):
                     params["speexmode"] = "2"
                     params["audio"] = base64.b64encode(open(self.temp_file, 'rt').read()).replace(b'\n',b'')
                     result = requests.get("http://api.ispeech.org/api/rest?" + urlencode(params))
-                    print result
+                    result = self.wit.get_message(query = result.json()['text'], context = self.wit_context)
 
-                    result = self.wit.get_message(result.json()['text'])
-                    
-                elif self.asr_engine == "google":
-                    for b in self._read_audio_buffer(file_mode = True):
+                elif self.configuration['asr'] == "google":
+                    for b in self._readAudioBuffer(file_mode = True):
                         pass
                     url = 'https://www.google.com/speech-api/v2/recognize?output=json&lang=fr-fr&key=AIzaSyCQv4U1mTaw_r_j1bWb1peeaTihzV0q-EQ'
                     audio = open(self.temp_file, "rb").read()
                     header = {"Content-Type": "audio/x-flac; rate=16000"}
                     post = urlopen(Request(url, audio, header))
                     result = loads(post.read().split("\n")[1])['result'][0]['alternative'][0]['transcript']
-                    result = self.wit.get_message(result)
-                
+                    result = self.wit.get_message(query = result, context = self.wit_context)
+
                 # Defautl Wit
                 else:
-                    result = self.wit.post_speech(data = self._read_audio_buffer(), content_type = CONTENT_TYPE, context = self.wit_context)
+                    result = self.wit.post_speech(data = self._readAudioBuffer(), content_type = CONTENT_TYPE, context = self.wit_context)
 
                 result['msg_body'] = result['msg_body'].encode("utf-8")
             except Exception as e:
@@ -178,9 +173,9 @@ class Recorder(threading.Thread):
             # Question mode
             if len(result) > 0 and self.continuous_mode == True and result.has_key('msg_body') == True and len(result['msg_body']) > 0:
                 # Send answer
-                self.lisa_client.sendChat(message = result['msg_body'], outcome = result['outcome'])
+                self.factory.sendChatToServer(message = result['msg_body'], outcome = result['outcome'])
             # If Wit did not succeeded
-            elif len(result) == 0 or result.has_key('outcome') == False or result['outcome'].has_key('confidence') == False or result['outcome']['confidence'] < self.wit_confidence:
+            elif len(result) == 0 or result.has_key('outcome') == False or result['outcome'].has_key('confidence') == False or result['outcome']['confidence'] < self.configuration['wit_confidence']:
                 if wit_e is not None:
                     log.err("Wit exception : {0}".format(str(e)))
                 elif len(result) == 0:
@@ -188,7 +183,7 @@ class Recorder(threading.Thread):
                 elif result.has_key('outcome') == False or result['outcome'].has_key('confidence') == False:
                     log.err("Wit response syntax error")
                     log.err("result : {0}".format(result))
-                elif result['outcome']['confidence'] < self.wit_confidence:
+                elif result['outcome']['confidence'] < self.configuration['wit_confidence']:
                     log.err("Wit confidence {confidence} too low : {result}".format(confidence = result['outcome']['confidence'], result = result['msg_body']))
                 else:
                     log.err("Error response from Wit : {0}".format(result['msg_body']))
@@ -196,7 +191,7 @@ class Recorder(threading.Thread):
             # Send recognized intent to the server
             else:
                 log.msg("Wit result : {0}".format(result['msg_body']))
-                self.lisa_client.sendChat(message = result['msg_body'], outcome = result['outcome'])
+                self.factory.sendChatToServer(message = result['msg_body'], outcome = result['outcome'])
 
             # Finish current record
             self.record['start'] = 0
@@ -207,7 +202,7 @@ class Recorder(threading.Thread):
             self.record['buffers'].clear()
 
     #-----------------------------------------------------------------------------
-    def vader_start(self):
+    def vaderStart(self):
         """
         Vader start detection
         """
@@ -220,9 +215,9 @@ class Recorder(threading.Thread):
 
             # Reset max recording time
             self.record['end'] = self.record['start'] + MAX_RECORD_DURATION_s
-        
+
     #-----------------------------------------------------------------------------
-    def vader_stop(self):
+    def vaderStop(self):
         """
         Vader stop detection
         """
@@ -232,7 +227,7 @@ class Recorder(threading.Thread):
             self.record['end'] = time() + MAX_SILENCE_s
 
     #-----------------------------------------------------------------------------
-    def _capture_audio_buffer(self, app):
+    def _captureAudioBuffer(self, app):
         """
         Gstreamer pipeline callback : Audio buffer capture
         """
@@ -250,9 +245,9 @@ class Recorder(threading.Thread):
             if self.record['activated'] == False and self.continuous_mode == False:
                 while self.record['buffers'][0]['time'] + MAX_TIME_BEFORE_KWS_s < cur_time:
                     self.record['buffers'].popleft()
-            
+
     #-----------------------------------------------------------------------------
-    def _read_audio_buffer(self, file_mode = False):
+    def _readAudioBuffer(self, file_mode = False):
         """
         Read buffers from capture queue
         """
@@ -263,7 +258,7 @@ class Recorder(threading.Thread):
         f = None
         if file_mode == True:
             f = open(self.temp_file, "wb")
-        
+
         # While recording is running
         log.msg("Wit send start")
         while not self._stopevent.isSet():
@@ -280,7 +275,7 @@ class Recorder(threading.Thread):
                 # Record is live, wait another buffer
                 sleep(.05)
                 continue
-            
+
             # Read buffer
             buf = None
             while len(self.record['buffers']) > 0 and (buf is None or len(buf) + len(self.record['buffers'][0]['data']) < 1200):
@@ -296,5 +291,5 @@ class Recorder(threading.Thread):
         if file_mode == True:
             f.close()
         log.msg("Wit send end")
-        
+
 # --------------------- End of recorder.py  ---------------------
