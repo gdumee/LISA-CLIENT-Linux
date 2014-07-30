@@ -58,6 +58,8 @@ class LisaClient(LineReceiver):
     """
     Lisa TCP client
     """
+
+    #-----------------------------------------------------------------------------
     def __init__(self, factory):
         self.factory = factory
         self.configuration = ConfigManager.getConfiguration()

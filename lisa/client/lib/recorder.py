@@ -50,6 +50,8 @@ class Recorder(threading.Thread):
     """
     Continuous recording class.
     """
+
+    #-----------------------------------------------------------------------------
     def __init__(self, factory):
         # Init thread class
         threading.Thread.__init__(self)
