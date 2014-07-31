@@ -117,18 +117,18 @@ class ConfigManager(object):
         self.configuration['trans'] = NeoTrans(domain = 'lisa', localedir = lang_path, languages = [self.configuration['lang_short']]).Trans
 
     #-----------------------------------------------------------------------------
-    def _getConfiguration(self):
-        if ConfigManager.__instance is None:
-            ConfigManager.__instance = ConfigManager()
-        return ConfigManager.__instance.configuration
-    getConfiguration = classmethod(_getConfiguration)
+    @classmethod
+    def getConfiguration(cls):
+        if cls.__instance is None:
+            cls.__instance = ConfigManager()
+        return cls.__instance.configuration
 
     #-----------------------------------------------------------------------------
-    def _setConfiguration(self, config_file):
-        ConfigManager.__instance = None
-        ConfigManager.__instance = ConfigManager(config_file)
-        return ConfigManager.__instance.valid_flag
-    setConfiguration = classmethod(_setConfiguration)
+    @classmethod
+    def setConfiguration(cls, config_file):
+        cls.__instance = None
+        cls.__instance = ConfigManager(config_file)
+        return cls.__instance.valid_flag
 
 
 # --------------------- End of config_manager.py  ---------------------

@@ -62,33 +62,33 @@ class Speaker(threading.Thread):
         threading.Thread.start(self)
 
     #-----------------------------------------------------------------------------
-    def _start(self, listener):
+    @classmethod
+    def start(cls,listener):
         # Create singleton
-        if self.__instance is None:
-            self.__instance = Speaker(listener)
-    start = classmethod(_start)
+        if cls.__instance is None:
+            cls.__instance = Speaker(listener)
 
     #-----------------------------------------------------------------------------
-    def _speak(self, msg, block = True):
+    @classmethod
+    def speak(cls, msg, block = True):
         # Queue message
-        if self.__instance is not None:
-            self.__instance.queue.put(msg)
+        if cls.__instance is not None:
+            cls.__instance.queue.put(msg)
 
             # Waits the end
             if block == True:
-                self.__instance.queue.join()
-    speak = classmethod(_speak)
+                cls.__instance.queue.join()
 
     #-----------------------------------------------------------------------------
-    def _stop(self):
+    @classmethod
+    def stop(cls):
         # Raise stop event
-        if self.__instance is not None:
-            self.__instance._stopevent.set()
-            self.__instance = None
+        if cls.__instance is not None:
+            cls.__instance._stopevent.set()
+            cls.__instance = None
 
         # Free player
         Player.free()
-    stop = classmethod(_stop)
 
     #-----------------------------------------------------------------------------
     def run(self):
