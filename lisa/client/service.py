@@ -56,7 +56,7 @@ LisaFactory = None
 #-----------------------------------------------------------------------------
 class LisaClient(LineReceiver):
     """
-    Lisa TCP client
+    TCP client/server protocol
     """
 
     #-----------------------------------------------------------------------------
@@ -172,9 +172,6 @@ class LisaClient(LineReceiver):
 # LisaClientFactory
 #-----------------------------------------------------------------------------
 class LisaClientFactory(ReconnectingClientFactory):
-    # Create protocol
-    active_protocol = None
-
     #-----------------------------------------------------------------------------
     def __init__(self):
         self.configuration = ConfigManager.getConfiguration()
@@ -289,7 +286,6 @@ def sigint_handler(signum, frame):
 
     # Stop reactor
     reactor.stop()
-
 
 #-----------------------------------------------------------------------------
 # Make twisted service

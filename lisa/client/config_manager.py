@@ -26,6 +26,7 @@ from lisa.Neotique.NeoTrans import NeoTrans
 #-----------------------------------------------------------------------------
 class ConfigManager(object):
     """
+    Manage configuration
     """
     # Singleton
     __instance = None
