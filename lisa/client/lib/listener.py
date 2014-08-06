@@ -30,7 +30,7 @@ import pocketsphinx
 from twisted.python import log
 from lisa.client.lib.speaker import Speaker
 from lisa.client.lib.recorder import Recorder
-from lisa.client.ConfigManager import ConfigManager
+from lisa.client.config_manager import ConfigManager
 
 
 #-----------------------------------------------------------------------------

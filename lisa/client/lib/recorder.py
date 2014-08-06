@@ -13,7 +13,7 @@
 #-----------------------------------------------------------------------------
 # Imports
 #-----------------------------------------------------------------------------
-from lisa.client.ConfigManager import ConfigManager
+from lisa.client.config_manager import ConfigManager
 from lisa.client.lib.player import Player
 from collections import deque
 import threading
@@ -50,6 +50,8 @@ class Recorder(threading.Thread):
     """
     Continuous recording class.
     """
+
+    #-----------------------------------------------------------------------------
     def __init__(self, factory):
         # Init thread class
         threading.Thread.__init__(self)

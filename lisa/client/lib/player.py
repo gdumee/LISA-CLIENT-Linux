@@ -16,7 +16,7 @@
 import gst
 import os
 import gobject
-from lisa.client.ConfigManager import ConfigManager
+from lisa.client.config_manager import ConfigManager
 gobject.threads_init()
 
 
@@ -37,39 +37,39 @@ class Player:
     __instance = None
 
     #-----------------------------------------------------------------------------
-    def play(self, sound, path = None, ext = None):
+    @classmethod
+    def play(cls, sound, path = None, ext = None):
         # Create singleton
-        if self.__instance is None:
-            self.__instance = Player()
+        if cls.__instance is None:
+            cls.__instance = Player()
 
         # Call singleton API
-        self.__instance._play(sound, path, ext)
-    play = classmethod(play)
+        cls.__instance._play(sound, path, ext)
 
     #-----------------------------------------------------------------------------
-    def playBlock(self, sound, path = None, ext = None):
+    @classmethod
+    def playBlock(cls, sound, path = None, ext = None):
         # Create singleton
-        if self.__instance is None:
-            self.__instance = Player()
+        if cls.__instance is None:
+            cls.__instance = Player()
 
         # Call singleton API
-        self.__instance._playBlock(sound, path, ext)
-    playBlock = classmethod(playBlock)
+        cls.__instance._playBlock(sound, path, ext)
 
     #-----------------------------------------------------------------------------
-    def free(self):
+    @classmethod
+    def free(cls):
         # Create singleton
-        if self.__instance is None:
+        if cls.__instance is None:
             return
 
         # Call singleton API
-        self.__instance._free()
-    free = classmethod(free)
+        cls.__instance._free()
 
     #-----------------------------------------------------------------------------
     def __init__(self):
         # Check Singleton
-        if self.__instance is not None:
+        if Player.__instance is not None:
             raise Exception("Singleton can't be created twice !")
 
         # Create a gtreamer playerbin

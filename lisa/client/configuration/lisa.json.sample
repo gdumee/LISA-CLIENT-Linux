@@ -1,18 +1,22 @@
 {
-    "lisa_url": "demo.lisa-project.net",
-    "lisa_engine_port": 10042,
-    "lisa_engine_port_ssl": 10043,
-    "enable_secure_mode": false,
+    "lang": "fr-FR",
+
+    "lisa_url": "localhost",
+    "lisa_port": 10042,
+    "enable_secure_mode": true,
+
     "debug": {
         "debug_input": true,
         "debug_output": true
     },
-    "zone": "zone2",
-    "tts": "pico",
-    "lang": "fr-FR",
-    "wit_token": "ATSHFOROYVUWQ3HTYBGHJNNYAXD7NTBC",
+    "zone": "Salon",
 
-    "record_seconds": 3,
-    "sleep_time": 15,
-    "keyword_score": -19000
+    "tts": "pico",
+    "voicerss_key": "03e60c7e670b405f9210cd025c2bb440",
+
+    "wit_token": "Z45ZDBO54WA2OBL3N4USAYGF5FMHVCCL",
+    "wit_confidence": 0.600,
+
+    "hmm": "hub4wsj_sc_8k",
+    "keyword_score": -20000
 }
