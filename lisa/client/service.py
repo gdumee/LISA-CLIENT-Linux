@@ -182,6 +182,13 @@ class LisaClientFactory(ReconnectingClientFactory):
         self.listener = None
 
     #-----------------------------------------------------------------------------
+    def startFactory(self):
+        # Create workers
+        if self.listener is None:
+            self.listener = Listener(factory = self)
+            Speaker.start(listener = self.listener)
+
+    #-----------------------------------------------------------------------------
     def setBotName(self, botname):
         # Restart listener with new botname
         self.listener.setBotName(botname)
@@ -204,11 +211,6 @@ class LisaClientFactory(ReconnectingClientFactory):
 
     #-----------------------------------------------------------------------------
     def buildProtocol(self, addr):
-        # Create workers
-        if self.listener is None:
-            self.listener = Listener(factory = self)
-            Speaker.start(listener = self.listener)
-
         # Reset retry delay
         self.resetDelay()
 
